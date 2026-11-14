@@ -26,6 +26,11 @@ export function initAuditLogger(logs: AuditLog[]): void {
   auditLogsRef = logs;
 }
 
+/** Read-only copy of the audit trail, for screens that need to show "what changed and why". */
+export function getAuditLogs(): AuditLog[] {
+  return auditLogsRef ? [...auditLogsRef] : [];
+}
+
 /**
  * Record an audit log entry for a state-changing operation.
  * Safe to call even if the audit logger hasn't been initialized (no-op).
@@ -38,6 +43,7 @@ export function recordAuditLog(input: {
   summary: string;
   category: AuditLog['category'];
   linkTo?: string;
+  storeId?: AllMallId;
 }): void {
   if (!auditLogsRef) {
     console.warn('[auditLogger] Not initialized — skipping audit log:', input.summary);
@@ -54,6 +60,7 @@ export function recordAuditLog(input: {
     at: new Date().toISOString(),
     category: input.category,
     linkTo: input.linkTo,
+    storeId: input.storeId,
   };
 
   auditLogsRef.push(entry);

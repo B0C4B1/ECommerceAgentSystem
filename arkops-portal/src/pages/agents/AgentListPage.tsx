@@ -23,6 +23,7 @@ import { AgentPreEnableDrawer } from '../../components/agents/AgentPreEnableDraw
 import { EnableAllReviewModal } from '../../components/agents/EnableAllReviewModal';
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
 import { StatusBadge } from '../../components/StatusBadge';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
@@ -51,7 +52,9 @@ const layerColors: Record<AgentLayer, string> = {
 export function AgentListPage() {
   const { t } = useI18n();
   const { user } = useAuth();
+  const { can } = usePermission();
   const navigate = useNavigate();
+  const canUpdateAgents = can('agents', 'update');
   const queryClient = useQueryClient();
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: agentsApi.list });
   const [searchText, setSearchText] = useState('');
@@ -95,9 +98,11 @@ export function AgentListPage() {
 
   const toggleMutation = useMutation({
     mutationFn: (agentType: AgentType) => agentsApi.toggle(agentType),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
-      message.success(t('agent.toggleSuccess'));
+      // S1/S4：开关会改变下一轮提案来源，工作台要跟着刷新。
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      message.success(updated?.enabled ? t('agent.toggledOnHint') : t('agent.toggleSuccess'));
     },
     onError: (error: Error) => {
       message.error(error.message);
@@ -217,7 +222,7 @@ export function AgentListPage() {
             <Switch
               size="small"
               checked={locked ? false : record.enabled}
-              disabled={disabled || locked}
+              disabled={disabled || locked || !canUpdateAgents}
               onChange={() => {
                 // WS-D (D4): enabling goes through the shared pre-enable drawer;
                 // disabling stays a direct toggle.
@@ -313,7 +318,7 @@ export function AgentListPage() {
     return (
       <div className="page-stack">
         <PageHeader title={t('agent.title')} description={t('agent.description')} />
-        <StoreConnectionEmptyState description="连接店铺并完成首次同步后，运营 Agent 才会开始分析数据并执行任务。" />
+        <StoreConnectionEmptyState description={t('agents.emptyNoStore')} />
       </div>
     );
   }
@@ -397,7 +402,7 @@ export function AgentListPage() {
           allowClear
           style={{ maxWidth: 400 }}
         />
-        {disabledAgents > 0 && (
+        {disabledAgents > 0 && canUpdateAgents && (
           <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => setBulkModalOpen(true)}>
             {t('agenttrust.bulkEnableButton')} ({disabledAgents})
           </Button>

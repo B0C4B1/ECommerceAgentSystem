@@ -1,5 +1,6 @@
 import { TeamOutlined, WarningOutlined } from '@ant-design/icons';
 import { Button, Card, Col, Progress, Row, Space, Tag, Typography, message } from 'antd';
+import { useState } from 'react';
 import { useI18n } from '../../../app/i18n';
 import { mockChurnRisks, mockCoupons, mockSegments } from '../agentConfigMockData';
 import { BaseWorkflowModal } from './BaseWorkflowModal';
@@ -12,6 +13,24 @@ interface CrmRetentionModalProps {
 export function CrmRetentionModal(props: CrmRetentionModalProps) {
   const { t } = useI18n();
   const { crmOpen, onCloseCrm } = props;
+  const [sentCoupons, setSentCoupons] = useState<number[]>([]);
+  const [sentRisks, setSentRisks] = useState<number[]>([]);
+  const segmentLabelKey: Record<string, string> = {
+    new: 'crm.segNew',
+    active: 'crm.segActive',
+    dormant: 'crm.segDormant',
+    churned: 'crm.segChurned'
+  };
+
+  const sendCoupon = (couponId: number, target: keyof typeof mockSegments) => {
+    setSentCoupons(prev => (prev.includes(couponId) ? prev : [...prev, couponId]));
+    message.success(t('crm.couponSent', { count: mockSegments[target].count }));
+  };
+
+  const sendRetention = (riskId: number, name: string) => {
+    setSentRisks(prev => (prev.includes(riskId) ? prev : [...prev, riskId]));
+    message.success(t('crm.retentionSent', { name }));
+  };
 
   return (
     <BaseWorkflowModal
@@ -60,7 +79,7 @@ export function CrmRetentionModal(props: CrmRetentionModalProps) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                         <Space size={6}>
                           <div style={{ width: 10, height: 10, borderRadius: 2, background: seg.color }} />
-                          <Typography.Text strong style={{ fontSize: 12 }}>{seg.label}</Typography.Text>
+                          <Typography.Text strong style={{ fontSize: 12 }}>{t(segmentLabelKey[key] ?? 'crm.segmentTab')}</Typography.Text>
                           <Tag color="default" style={{ fontSize: 10 }}>{seg.pct}%</Tag>
                         </Space>
                         <Typography.Text type="secondary" style={{ fontSize: 11 }}>
@@ -121,8 +140,19 @@ export function CrmRetentionModal(props: CrmRetentionModalProps) {
                     </Col>
                   </Row>
                   <div style={{ marginTop: 8, display: 'flex', gap: 4 }}>
-                    <Button size="small" type="primary" ghost style={{ fontSize: 10 }} onClick={() => message.success(t('crm.couponSent', { count: mockSegments[coupon.target as keyof typeof mockSegments].count }))}>{t('crm.sendAll')}</Button>
-                    <Button size="small" style={{ fontSize: 10 }} onClick={() => message.success(t('crm.ruleSaved'))}>{t('crm.editRule')}</Button>
+                    {sentCoupons.includes(coupon.id) ? (
+                      <Tag color="green" style={{ fontSize: 10 }}>{t('crm.sent')}</Tag>
+                    ) : (
+                      <Button
+                        size="small"
+                        type="primary"
+                        ghost
+                        style={{ fontSize: 10 }}
+                        onClick={() => sendCoupon(coupon.id, coupon.target as keyof typeof mockSegments)}
+                      >
+                        {t('crm.sendAll')}
+                      </Button>
+                    )}
                   </div>
                 </Card>
               ))}
@@ -175,8 +205,13 @@ export function CrmRetentionModal(props: CrmRetentionModalProps) {
                     </Typography.Text>
                   </div>
                   <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-                    <Button size="small" type="primary" ghost style={{ fontSize: 10 }} onClick={() => message.success(t('crm.retentionSent', { name: risk.name }))}>{t('crm.sendRetention')}</Button>
-                    <Button size="small" style={{ fontSize: 10 }} onClick={() => message.info(risk.reason)}>{t('crm.viewDetail')}</Button>
+                    {sentRisks.includes(risk.id) ? (
+                      <Tag color="green" style={{ fontSize: 10 }}>{t('crm.sent')}</Tag>
+                    ) : (
+                      <Button size="small" type="primary" ghost style={{ fontSize: 10 }} onClick={() => sendRetention(risk.id, risk.name)}>
+                        {t('crm.sendRetention')}
+                      </Button>
+                    )}
                   </div>
                 </Card>
               ))}

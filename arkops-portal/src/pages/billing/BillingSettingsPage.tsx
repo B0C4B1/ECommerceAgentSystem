@@ -19,7 +19,7 @@ export function BillingSettingsPage() {
   const tabItems = [
     {
       key: 'usage',
-      label: '用量与账单',
+      label: t('finance.tabUsage'),
       children: (
         <>
           <FinanceSummary onSwitchToSubscription={() => setActiveTab('subscription')} />
@@ -31,7 +31,7 @@ export function BillingSettingsPage() {
     },
     {
       key: 'subscription',
-      label: '订阅与支付',
+      label: t('finance.tabSubscription'),
       children: (
         <>
           <CurrentPlanSection />

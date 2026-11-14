@@ -2,6 +2,7 @@
  * Promotion Campaign Mock API (V1.1)
  */
 import { mockDelay } from './client';
+import { registerMockState } from './mockPersistence';
 import type { AllMallId, PromotionCampaign, PromotionStats, PromotionType } from '../types/domain';
 
 const now = Date.now();
@@ -39,14 +40,15 @@ export const promotionsApi = {
     return mockDelay(result);
   },
 
-  getStats: () => {
-    const active = campaigns.filter((c) => c.status === 'active').length;
-    const scheduled = campaigns.filter((c) => c.status === 'scheduled').length;
-    const ended = campaigns.filter((c) => c.status === 'ended').length;
-    const totalRevenue = campaigns.reduce((s, c) => s + c.revenue, 0);
-    const totalRoi = campaigns.filter((c) => c.roi > 0).length > 0
-      ? +(campaigns.filter((c) => c.roi > 0).reduce((s, c) => s + c.revenue, 0) /
-          campaigns.filter((c) => c.roi > 0).reduce((s, c) => s + c.spent, 0)).toFixed(2)
+  getStats: (storeId?: AllMallId) => {
+    const scoped = storeId ? campaigns.filter((c) => c.storeId === storeId) : campaigns;
+    const active = scoped.filter((c) => c.status === 'active').length;
+    const scheduled = scoped.filter((c) => c.status === 'scheduled').length;
+    const ended = scoped.filter((c) => c.status === 'ended').length;
+    const totalRevenue = scoped.reduce((s, c) => s + c.revenue, 0);
+    const totalRoi = scoped.filter((c) => c.roi > 0).length > 0
+      ? +(scoped.filter((c) => c.roi > 0).reduce((s, c) => s + c.revenue, 0) /
+          scoped.filter((c) => c.roi > 0).reduce((s, c) => s + c.spent, 0)).toFixed(2)
       : 0;
     return mockDelay({ active, scheduled, ended, totalRevenue, totalRoi } as PromotionStats);
   },
@@ -65,4 +67,27 @@ export const promotionsApi = {
     campaigns.push(campaign);
     return campaign;
   },
+
+  /** 促销 Agent 的自动创建开关：属于用户已保存的配置，刷新后保持。 */
+  getAutomationEnabled: () => automationEnabled,
+  setAutomationEnabled: (enabled: boolean) => {
+    automationEnabled = enabled;
+  },
 };
+
+let automationEnabled = true;
+
+registerMockState(
+  'promotions.campaigns',
+  () => campaigns,
+  (value) => {
+    if (Array.isArray(value)) campaigns.splice(0, campaigns.length, ...(value as PromotionCampaign[]));
+  }
+);
+registerMockState(
+  'promotions.automation',
+  () => automationEnabled,
+  (value) => {
+    if (typeof value === 'boolean') automationEnabled = value;
+  }
+);

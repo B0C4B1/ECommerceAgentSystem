@@ -7,6 +7,7 @@ import { FocusedLayout } from './layout/FocusedLayout';
 import { useAuth } from './auth';
 import { RoleGuard } from '../components/RoleGuard';
 import { DashboardSkeleton, AgentListSkeleton, TablePageSkeleton } from '../components/PageSkeleton';
+import { NotFoundPage, RouteErrorPage } from '../pages/system/SystemPages';
 
 const AgentConfigPage = lazy(() => import('../pages/agents/AgentConfigPage').then((module) => ({ default: module.AgentConfigPage })));
 const AgentListPage = lazy(() => import('../pages/agents/AgentListPage').then((module) => ({ default: module.AgentListPage })));
@@ -88,11 +89,12 @@ function LoginEntry() {
 
 const router = createBrowserRouter(
   [
-    { path: '/login', element: <LoginEntry /> },
+    { path: '/login', element: <LoginEntry />, errorElement: <RouteErrorPage /> },
     // 店铺引导 / 迁移向导 —— 使用聚焦布局，隐藏全局导航，让用户专注单一任务
     {
       path: '/stores/onboarding',
       element: <ProtectedFocusedLayout />,
+      errorElement: <RouteErrorPage />,
       children: [
         { index: true, element: guarded('/stores', <StoreOnboardingPage />) },
       ],
@@ -100,6 +102,7 @@ const router = createBrowserRouter(
     {
       path: '/',
       element: <ProtectedAppShell />,
+      errorElement: <RouteErrorPage />,
       children: [
         { index: true, element: <Navigate to="/dashboard" replace /> },
 
@@ -161,7 +164,6 @@ const router = createBrowserRouter(
         // 设置（含子项）
         { path: 'settings/members', element: guarded('/settings/members', <MembersSettingsPage />) },
         { path: 'settings/notifications', element: guarded('/settings/notifications', <NotificationsSettingsPage />) },
-        { path: 'settings/stores', element: guarded('/settings/stores', <StoreListPage />) },
         { path: 'settings/models', element: guarded('/settings/models', <ModelListPage />) },
         { path: 'settings/audit-logs', element: guarded('/settings/audit-logs', <AuditLogsPage />) },
         { path: 'settings/billing', element: guarded('/settings/billing', <BillingSettingsPage />) },
@@ -174,6 +176,9 @@ const router = createBrowserRouter(
 
         // 快速配置
         { path: 'setup', element: guarded('/setup', <SetupConfigPage />) },
+
+        // 未知路径兜底：留在应用框架内，给出返回入口，而不是落到路由默认错误页
+        { path: '*', element: <NotFoundPage /> },
       ]
     }
   ],

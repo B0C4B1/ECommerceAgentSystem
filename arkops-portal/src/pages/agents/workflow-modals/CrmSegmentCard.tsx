@@ -8,13 +8,13 @@ export function CrmSegmentCard() {
   const { t } = useI18n();
   const [refreshing, setRefreshing] = useState(false);
   const [sendingCoupons, setSendingCoupons] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState('2h ago');
+  const [lastRefresh, setLastRefresh] = useState(() => t('inbox.hoursAgo', { hours: 2 }));
 
   const handleRefresh = () => {
     setRefreshing(true);
     setTimeout(() => {
       setRefreshing(false);
-      setLastRefresh('just now');
+      setLastRefresh(t('inbox.justNow'));
       message.success(t('crm.refreshDone'));
     }, 2000);
   };
@@ -23,6 +23,7 @@ export function CrmSegmentCard() {
     setSendingCoupons(true);
     setTimeout(() => {
       setSendingCoupons(false);
+      setSegmentData(prev => prev.map(s => ({ ...s, issued: true })));
       message.success(t('crm.couponDone'));
     }, 1500);
   };
@@ -30,6 +31,7 @@ export function CrmSegmentCard() {
   const [segmentData, setSegmentData] = useState(() =>
     Object.values(mockSegments).map((val, idx) => ({
       key: idx,
+      segmentKey: ['crm.segNew', 'crm.segActive', 'crm.segDormant', 'crm.segChurned'][idx],
       ...val,
       issued: false,
     })),
@@ -58,8 +60,8 @@ export function CrmSegmentCard() {
     {
       title: t('crm.segmentName'),
       dataIndex: 'label',
-      render: (v: string, record: typeof segmentData[0]) => (
-        <Tag color={record.color} style={{ fontSize: 11 }}>{v}</Tag>
+      render: (_: string, record: typeof segmentData[0]) => (
+        <Tag color={record.color} style={{ fontSize: 11 }}>{t(record.segmentKey)}</Tag>
       ),
     },
     {

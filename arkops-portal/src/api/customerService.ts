@@ -3,6 +3,7 @@
  * Provides sessions, messages, and quick-reply templates for the customer service page.
  */
 import { mockDelay } from './client';
+import { registerMockState } from './mockPersistence';
 import type { AllMallId, CustomerSession, CustomerMessage, QuickReplyTemplate, SessionStatus } from '../types/domain';
 
 // ===== Seed Data =====
@@ -169,10 +170,22 @@ export const customerServiceApi = {
     };
     if (!messages[sessionId]) messages[sessionId] = [];
     messages[sessionId].push(msg);
+    // 首次人工回复后记录真实首响时长，SLA 指标随回复动作变化。
+    if (session.firstResponseSeconds === undefined) {
+      const firstBuyerMessage = messages[sessionId].find((m) => m.sender === 'buyer');
+      if (firstBuyerMessage) {
+        session.firstResponseSeconds = Math.max(
+          1,
+          Math.round((Date.now() - new Date(firstBuyerMessage.createdAt).getTime()) / 1000)
+        );
+      }
+    }
     session.lastMessage = content;
     session.lastMessageAt = new Date().toISOString();
     session.unreadCount = 0;
     session.status = 'replied';
+    session.handledBy = 'human';
+    session.needsHuman = false;
     return msg;
   },
 
@@ -188,6 +201,8 @@ export const customerServiceApi = {
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) throw new Error('Session not found');
     session.tags = [...new Set([...session.tags, '已转人工'])];
+    session.handledBy = 'human';
+    session.needsHuman = true;
     const msg: CustomerMessage = {
       id: (Math.max(...Object.values(messages).flat().map((m) => m.id), 20000) + 1) as AllMallId,
       sessionId,
@@ -201,3 +216,21 @@ export const customerServiceApi = {
     return { session, escalationId: Date.now() };
   },
 };
+
+// 会话与消息是客服页的全部可变状态：回复、关闭、转人工都要在刷新后保留。
+registerMockState(
+  'customerService.sessions',
+  () => sessions,
+  (value) => {
+    if (Array.isArray(value)) sessions.splice(0, sessions.length, ...(value as CustomerSession[]));
+  }
+);
+registerMockState(
+  'customerService.messages',
+  () => messages,
+  (value) => {
+    if (!value || typeof value !== 'object') return;
+    (Object.keys(messages) as unknown as AllMallId[]).forEach((key) => delete messages[key]);
+    Object.assign(messages, value as Record<AllMallId, CustomerMessage[]>);
+  }
+);

@@ -5,21 +5,21 @@ import {
   EditOutlined,
   PlusOutlined,
   RightOutlined,
-  RobotOutlined,
   SyncOutlined,
   ThunderboltOutlined,
   WarningOutlined
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Progress, Row, Select, Space, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Popconfirm, Progress, Row, Select, Space, Tabs, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { mergeSuggestionsApi, productListingsApi, productsApi, syncApi } from '../../api/products';
 import { storesApi } from '../../api/stores';
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { useStoreScope } from '../../app/storeScope';
 import { PageFilterBar } from '../../components/filters/PageFilterBar';
 import { MetricCard } from '../../components/metrics/MetricCard';
@@ -40,7 +40,7 @@ type TranslateFn = ReturnType<typeof useI18n>['t'];
 /** Stock level below which a product's shared pool counts as low. */
 const LOW_STOCK_THRESHOLD = 50;
 
-type StockFilter = 'all' | 'healthy' | 'low' | 'out';
+type StockFilter = 'all' | 'healthy' | 'low' | 'out' | 'alert';
 /** "Listed on / not listed on [store]" — the gap-finder toggle (§3.14.2). Only active with a specific storeFilter. */
 type ListedToggle = 'any' | 'listed' | 'not_listed';
 
@@ -86,7 +86,7 @@ function MergeCandidate({ product, listings, stores }: { product: Product; listi
 
 /** "待归并" tab (§3.14.8): side-by-side candidate comparison for the 60–95% confidence band. */
 function MergeQueueTab({
-  suggestions, products, listingsByProduct, stores, onMerge, onDismiss, merging, dismissing, t,
+  suggestions, products, listingsByProduct, stores, onMerge, onDismiss, merging, dismissing, t, readOnly = false,
 }: {
   suggestions: ProductMergeSuggestion[];
   products: Product[];
@@ -97,6 +97,7 @@ function MergeQueueTab({
   merging: boolean;
   dismissing: boolean;
   t: TranslateFn;
+  readOnly?: boolean;
 }) {
   const productById = new Map(products.map((p) => [p.id, p]));
 
@@ -119,12 +120,14 @@ function MergeQueueTab({
               </Col>
               <Col flex="1 1 260px"><MergeCandidate product={productB} listings={listingsByProduct.get(productB.id) ?? []} stores={stores} /></Col>
               <Col flex="0 0 auto">
-                <Space>
-                  <Popconfirm title={t('products.mergeConfirm')} onConfirm={() => onMerge(suggestion.id)} okText={t('common.confirm')} cancelText={t('common.cancel')}>
-                    <Button type="primary" loading={merging}>{t('products.merge')}</Button>
-                  </Popconfirm>
-                  <Button onClick={() => onDismiss(suggestion.id)} loading={dismissing}>{t('products.dismiss')}</Button>
-                </Space>
+                {!readOnly && (
+                  <Space>
+                    <Popconfirm title={t('products.mergeConfirm')} onConfirm={() => onMerge(suggestion.id)} okText={t('common.confirm')} cancelText={t('common.cancel')}>
+                      <Button type="primary" loading={merging}>{t('products.merge')}</Button>
+                    </Popconfirm>
+                    <Button onClick={() => onDismiss(suggestion.id)} loading={dismissing}>{t('products.dismiss')}</Button>
+                  </Space>
+                )}
               </Col>
             </Row>
             <Space size={4} wrap style={{ marginTop: 12 }}>
@@ -177,7 +180,7 @@ const AUTO_CHANGE_TYPE_COLOR: Record<AutoSyncChange['type'], string> = {
  * current?" uncertainty a silent sync leaves behind.
  */
 function SyncDigestCard({
-  result, log, expanded, onToggleExpanded, onRecheck, rechecking, stores, t,
+  result, log, expanded, onToggleExpanded, onRecheck, rechecking, stores, t, canRecheck = true,
 }: {
   result: SyncResult | null | undefined;
   log: AutoSyncChange[];
@@ -187,6 +190,7 @@ function SyncDigestCard({
   rechecking: boolean;
   stores: Store[];
   t: TranslateFn;
+  canRecheck?: boolean;
 }) {
   const hasRun = !!result;
   const failed = result?.status === 'failed';
@@ -222,9 +226,11 @@ function SyncDigestCard({
             {' · '}{t('products.syncCadence')}
           </Typography.Text>
         </Space>
-        <Button size="small" icon={<SyncOutlined spin={rechecking} />} loading={rechecking} onClick={onRecheck}>
-          {failed ? t('products.retryNow') : t('products.recheckNow')}
-        </Button>
+        {canRecheck && (
+          <Button size="small" icon={<SyncOutlined spin={rechecking} />} loading={rechecking} onClick={onRecheck}>
+            {failed ? t('products.retryNow') : t('products.recheckNow')}
+          </Button>
+        )}
       </div>
       {firstSyncInProgress && <Progress percent={70} status="active" showInfo={false} size="small" style={{ marginTop: 8 }} />}
       <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
@@ -279,6 +285,9 @@ function SyncDigestCard({
 export function ProductManagementPage() {
   const { t } = useI18n();
   const { user } = useAuth();
+  const { can } = usePermission();
+  const canCreateProduct = can('products', 'create');
+  const canUpdateProduct = can('products', 'update');
   const { scope: shellScope, isAllStores } = useStoreScope();
   const queryClient = useQueryClient();
 
@@ -313,7 +322,16 @@ export function ProductManagementPage() {
   const [editForm] = Form.useForm();
   const [listToStoreTarget, setListToStoreTarget] = useState<{ product: Product; storeId?: AllMallId } | null>(null);
   const [activeTab, setActiveTab] = useState('products');
-  const [createModalMode, setCreateModalMode] = useState<'manual' | 'recognize' | null>(null);
+  // 深链（总览库存预警卡 → /products?stock=low）直接落到对应筛选，不再让人自己再选一次。
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    const stock = searchParams.get('stock');
+    if (stock === 'low' || stock === 'out' || stock === 'alert') {
+      setStockFilter(stock);
+      setActiveTab('products');
+    }
+  }, [searchParams]);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [logExpanded, setLogExpanded] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<AllMallId[]>([]);
   const [bulkListModalOpen, setBulkListModalOpen] = useState(false);
@@ -396,7 +414,12 @@ export function ProductManagementPage() {
     if (statusFilter === 'all') return true;
     return productListings.some((l) => l.status === statusFilter);
   };
-  const matchesStock = (product: Product) => stockFilter === 'all' || productStockLevel(product) === stockFilter;
+  const matchesStock = (product: Product) => {
+    if (stockFilter === 'all') return true;
+    const level = productStockLevel(product);
+    // "alert" mirrors the KPI card (low + out of stock) so the card count equals the rows shown.
+    return stockFilter === 'alert' ? level === 'low' || level === 'out' : level === stockFilter;
+  };
 
   const filteredProducts = products.filter((p) => {
     const productListings = listingsByProduct.get(p.id) ?? [];
@@ -477,12 +500,14 @@ export function ProductManagementPage() {
     {
       title: t('common.actions'), key: 'actions', width: 190,
       render: (_: unknown, record: Product) => (
-        <TableActionGroup>
-          <Button size="small" disabled={availableStoresFor(record).length === 0} onClick={() => setListToStoreTarget({ product: record })}>
-            {t('products.listToStore')}
-          </Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditProduct(record)}>{t('common.edit')}</Button>
-        </TableActionGroup>
+        canUpdateProduct ? (
+          <TableActionGroup>
+            <Button size="small" disabled={availableStoresFor(record).length === 0} onClick={() => setListToStoreTarget({ product: record })}>
+              {t('products.listToStore')}
+            </Button>
+            <Button size="small" icon={<EditOutlined />} onClick={() => openEditProduct(record)}>{t('common.edit')}</Button>
+          </TableActionGroup>
+        ) : null
       )
     },
   ];
@@ -496,6 +521,7 @@ export function ProductManagementPage() {
       onSubmitForReview={(id) => submitForReviewMutation.mutate(id)}
       onPublish={(id) => publishMutation.mutate(id)}
       onDelist={(id) => delistMutation.mutate(id)}
+      readOnly={!canUpdateProduct}
     />
   );
 
@@ -503,7 +529,7 @@ export function ProductManagementPage() {
     return (
       <div className="page-stack">
         <PageHeader title={t('products.title')} description={t('products.description')} />
-        <StoreConnectionEmptyState description="尚未同步商品。连接已有店铺后，在售商品、SKU、价格和库存会自动出现在这里。" />
+        <StoreConnectionEmptyState description={t('products.emptyNoStore')} />
       </div>
     );
   }
@@ -514,30 +540,9 @@ export function ProductManagementPage() {
         title={t('products.title')}
         description={t('products.description')}
         actions={
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'manual', label: t('products.createManual') },
-                { key: 'recognize', label: t('products.createRecognize') },
-                {
-                  key: 'agent',
-                  icon: <RobotOutlined />,
-                  label: (
-                    <div>
-                      <div>{t('products.createViaAgent')}</div>
-                      <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('products.createViaAgentHint')}</Typography.Text>
-                    </div>
-                  ),
-                },
-              ],
-              onClick: ({ key }) => {
-                if (key === 'agent') { navigate('/agents/product_launch'); return; }
-                setCreateModalMode(key as 'manual' | 'recognize');
-              },
-            }}
-          >
-            <Button type="primary" icon={<PlusOutlined />}>{t('products.newProduct')} <DownOutlined /></Button>
-          </Dropdown>
+          canCreateProduct
+            ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>{t('products.newProduct')}</Button>
+            : null
         }
       />
 
@@ -550,6 +555,7 @@ export function ProductManagementPage() {
         rechecking={syncMutation.isPending}
         stores={stores}
         t={t}
+        canRecheck={canUpdateProduct}
       />
 
       <Row gutter={[16, 16]} className="store-kpi-row" style={{ marginBottom: 24 }}>
@@ -565,7 +571,7 @@ export function ProductManagementPage() {
           />
         </Col>
         <Col xs={12} sm={6}>
-          <div onClick={() => setStockFilter((prev) => (prev === 'low' || prev === 'out' ? 'all' : 'low'))} style={{ cursor: 'pointer' }}>
+          <div onClick={() => { setActiveTab('products'); setStockFilter((prev) => (prev === 'alert' ? 'all' : 'alert')); }} style={{ cursor: 'pointer' }}>
             <MetricCard
               className="stat-card stat-card-warning"
               title={t('products.inventoryAlert')}
@@ -577,14 +583,20 @@ export function ProductManagementPage() {
           </div>
         </Col>
         <Col xs={12} sm={6}>
-          <div onClick={() => setActiveTab(mergeCount > 0 ? 'merge' : 'drafts')} style={{ cursor: 'pointer' }}>
-            <MetricCard
-              className="stat-card stat-card-purple"
-              title={t('products.toHandle')}
-              value={mergeCount + draftListingsCount}
-              helper={t('products.toHandleMeta', { merge: mergeCount, drafts: draftListingsCount })}
-            />
-          </div>
+          {/* 合计口径与可点击项一致：卡片数字 = 归并 + 草稿，helper 分别给出两个入口，
+              避免“数字是两段之和、点击却只看到其中一段”。 */}
+          <MetricCard
+            className="stat-card stat-card-purple"
+            title={t('products.toHandle')}
+            value={mergeCount + draftListingsCount}
+            helper={
+              <Space size={4} wrap>
+                <Typography.Link onClick={() => setActiveTab('merge')}>{t('products.toHandleMerge', { count: mergeCount })}</Typography.Link>
+                <span>·</span>
+                <Typography.Link onClick={() => setActiveTab('drafts')}>{t('products.toHandleDrafts', { count: draftListingsCount })}</Typography.Link>
+              </Space>
+            }
+          />
         </Col>
       </Row>
 
@@ -630,6 +642,7 @@ export function ProductManagementPage() {
                     onChange={setStockFilter}
                     options={[
                       { value: 'all', label: t('products.stockAll') },
+                      { value: 'alert', label: t('products.stockAlert') },
                       { value: 'healthy', label: t('products.stockHealthy') },
                       { value: 'low', label: t('products.stockLow') },
                       { value: 'out', label: t('products.stockOut') },
@@ -661,11 +674,11 @@ export function ProductManagementPage() {
                   pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: [10, 20, 50] }}
                   expandable={{ expandedRowRender, rowExpandable: () => true }}
                   scroll={{ x: 1200 }}
-                  rowSelection={{
+                  rowSelection={canUpdateProduct ? {
                     selectedRowKeys,
                     onChange: (keys) => setSelectedRowKeys(keys as AllMallId[]),
                     preserveSelectedRowKeys: true,
-                  }}
+                  } : undefined}
                 />
               </>
             ),
@@ -684,6 +697,7 @@ export function ProductManagementPage() {
                 merging={mergeMutation.isPending}
                 dismissing={dismissMutation.isPending}
                 t={t}
+                readOnly={!canUpdateProduct}
               />
             ),
           },
@@ -763,15 +777,12 @@ export function ProductManagementPage() {
         onClose={() => { setBulkListModalOpen(false); setSelectedRowKeys([]); }}
       />
 
-      {createModalMode && (
-        <CreateProductModal
-          open={!!createModalMode}
-          mode={createModalMode}
-          stores={stores}
-          onClose={() => setCreateModalMode(null)}
-          onCreated={(product) => navigate(`/products/${product.id}`)}
-        />
-      )}
+      <CreateProductModal
+        open={createModalOpen}
+        stores={stores}
+        onClose={() => setCreateModalOpen(false)}
+        onCreated={(product) => navigate(`/products/${product.id}`)}
+      />
     </div>
   );
 }

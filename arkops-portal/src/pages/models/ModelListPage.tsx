@@ -5,6 +5,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { modelsApi } from '../../api/models';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { TrendBarChart } from '../../components/charts/TrendBarChart';
 import { MetricCard } from '../../components/metrics/MetricCard';
 import { PageHeader } from '../../components/PageHeader';
@@ -33,6 +34,10 @@ function estimateCost(modelId: string, totalTokens: number) {
 
 export function ModelListPage() {
   const { t } = useI18n();
+  const { can } = usePermission();
+  const canCreate = can('models', 'create');
+  const canUpdate = can('models', 'update');
+  const canDelete = can('models', 'delete');
   const queryClient = useQueryClient();
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [keyVerified, setKeyVerified] = useState(false);
@@ -59,6 +64,8 @@ export function ModelListPage() {
     onSuccess: () => {
       message.success(t('model.removed'));
       queryClient.invalidateQueries({ queryKey: ['models-custom'] });
+      queryClient.invalidateQueries({ queryKey: ['model-bindings'] });
+      queryClient.invalidateQueries({ queryKey: ['modelUsage'] });
     }
   });
 
@@ -120,6 +127,7 @@ export function ModelListPage() {
       render: (_: unknown, record: AgentModelBinding) => (
         <Select
           value={record.boundModelId}
+          disabled={!canUpdate}
           style={{ width: '100%' }}
           options={allModelOptions}
           optionRender={(option) => {
@@ -190,16 +198,20 @@ export function ModelListPage() {
       render: (desc: string) => <Typography.Text type="secondary" style={{ fontSize: 12 }}>{desc}</Typography.Text>
     },
     { title: 'API Key', dataIndex: 'apiKey', width: 120, render: (key: string | undefined) => key ?? '-' },
-    {
-      title: t('common.actions'),
-      width: 80,
-      key: 'actions',
-      render: (_: unknown, record: ModelInfo) => (
-        <Popconfirm title={t('common.confirmDelete')} onConfirm={() => removeMutation.mutate(record.id)} okText={t('common.confirm')} cancelText={t('common.cancel')} okButtonProps={{ danger: true }}>
-          <Button type="link" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
-      )
-    }
+    ...(canDelete
+      ? [
+          {
+            title: t('common.actions'),
+            width: 80,
+            key: 'actions',
+            render: (_: unknown, record: ModelInfo) => (
+              <Popconfirm title={t('common.confirmDelete')} onConfirm={() => removeMutation.mutate(record.id)} okText={t('common.confirm')} cancelText={t('common.cancel')} okButtonProps={{ danger: true }}>
+                <Button type="link" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            )
+          }
+        ]
+      : [])
   ];
 
   return (
@@ -218,7 +230,7 @@ export function ModelListPage() {
             value={totalEstimatedCost}
             precision={2}
             prefix={<WalletOutlined />}
-            suffix="元"
+            suffix={t('modelsv2.cny')}
             helper={t('modelsv2.estimatedCostHelper')}
           />
         </Col>
@@ -236,13 +248,13 @@ export function ModelListPage() {
       {/* 我的模型 */}
       <Card
         title={<><KeyOutlined /> {t('model.myModels')}</>}
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>{t('model.addCustom')}</Button>}
+        extra={canCreate ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>{t('model.addCustom')}</Button> : undefined}
         style={{ marginBottom: 24 }}
       >
         {customModels.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 32 }}>
             <Typography.Paragraph type="secondary">{t('model.noCustom')}</Typography.Paragraph>
-            <Button icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>{t('model.addCustom')}</Button>
+            {canCreate && <Button icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>{t('model.addCustom')}</Button>}
           </div>
         ) : (
           <Table rowKey="id" columns={customColumns} dataSource={customModels} pagination={false} scroll={{ x: 640 }} />
@@ -267,7 +279,7 @@ export function ModelListPage() {
                   {
                     value: stat.totalCalls,
                     max: Math.max(...usageStats.map((item) => item.totalCalls), 1),
-                    title: `${stat.modelName}: ${stat.totalCalls.toLocaleString()} 次`,
+                    title: `${stat.modelName}: ${stat.totalCalls.toLocaleString()} ${t('modelsv2.callsUnit')}`,
                     color: '#2563eb',
                     minHeight: 12,
                     width: 22
@@ -280,7 +292,7 @@ export function ModelListPage() {
                 <div key={stat.modelId} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--ark-border-soft)' }}>
                   <Typography.Text type="secondary" style={{ fontSize: 13 }}>{stat.modelName}</Typography.Text>
                   <Space size="large">
-                    <Typography.Text style={{ fontSize: 13, color: '#2563eb' }}>{stat.totalCalls.toLocaleString()} 次</Typography.Text>
+                    <Typography.Text style={{ fontSize: 13, color: '#2563eb' }}>{stat.totalCalls.toLocaleString()} {t('modelsv2.callsUnit')}</Typography.Text>
                     <Tooltip title={`${stat.totalTokens.toLocaleString()} Tokens`}>
                       <Typography.Text style={{ fontSize: 13, color: '#7c3aed' }}>
                         {t('modelsv2.costAbout')} ¥{estimateCost(stat.modelId, stat.totalTokens).toFixed(2)}

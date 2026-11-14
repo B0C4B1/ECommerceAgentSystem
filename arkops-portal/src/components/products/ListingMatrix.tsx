@@ -35,6 +35,7 @@ interface ListingMatrixProps {
   onPublish: (listingId: AllMallId) => void;
   onDelist: (listingId: AllMallId) => void;
   size?: 'small' | 'middle';
+  readOnly?: boolean;
 }
 
 /**
@@ -54,7 +55,7 @@ interface ListingMatrixProps {
  * Author: Michael Lee
  * Created: 2026-07-24
  */
-export function ListingMatrix({ product, stores, listings, onListToStore, onSubmitForReview, onPublish, onDelist, size = 'small' }: ListingMatrixProps) {
+export function ListingMatrix({ product, stores, listings, onListToStore, onSubmitForReview, onPublish, onDelist, size = 'small', readOnly = false }: ListingMatrixProps) {
   const { t } = useI18n();
   const listingByStoreId = new Map(listings.map((l) => [l.storeId, l]));
   const rows: ListingMatrixRow[] = stores.map((store) => ({ store, listing: listingByStoreId.get(store.id) }));
@@ -77,6 +78,7 @@ export function ListingMatrix({ product, stores, listings, onListToStore, onSubm
     {
       title: t('common.actions'), key: 'actions',
       render: (_: unknown, row) => {
+        if (readOnly) return null;
         if (!row.listing) {
           return <Button size="small" type="link" onClick={() => onListToStore(row.store.id)} style={{ padding: 0 }}>{t('listing.listToThisStore')}</Button>;
         }

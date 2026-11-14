@@ -30,7 +30,9 @@ import { useNavigate } from 'react-router-dom';
 import { agentsApi } from '../api/agents';
 import { approvalsApi } from '../api/approvals';
 import { storesApi } from '../api/stores';
+import { useAuth } from '../app/auth';
 import { useI18n } from '../app/i18n';
+import { canAccess } from '../app/rolePermissions';
 
 interface PaletteResult {
   key: string;
@@ -64,7 +66,10 @@ export function CommandPalette({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
+  const { role } = useAuth();
   const navigate = useNavigate();
+  // Cmd+K must never hand a restricted role a destination that ends in a 403.
+  const allowed = (path: string) => !role || canAccess(role, path.split('?')[0]);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<InputRef>(null);
@@ -111,11 +116,11 @@ export function CommandPalette({
       { title: t('nav.orders'), path: '/orders' },
       { title: t('nav.products'), path: '/products' },
       { title: t('nav.storeManagement'), path: '/stores' },
-      { title: t('nav.agentManagement'), path: '/agents' },
-      { title: t('nav.approvalCenter'), path: '/agents/approvals' },
-      { title: t('nav.exceptionCenter'), path: '/agents/exceptions' },
-    ],
-    [t]
+      { title: t('nav.approvalCenter'), path: '/inbox?type=approval' },
+      { title: t('nav.exceptionCenter'), path: '/inbox?type=exception' },
+    ].filter((page) => allowed(page.path)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t, role]
   );
 
   const results = useMemo<PaletteResult[]>(() => {
@@ -137,7 +142,7 @@ export function CommandPalette({
 
     if (hasQuery) {
       stores
-        .filter((store) => matches(query, store.name, store.platform))
+        .filter((store) => allowed(`/stores/${store.id}`) && matches(query, store.name, store.platform))
         .slice(0, MAX_PER_GROUP)
         .forEach((store) =>
           list.push({
@@ -151,7 +156,7 @@ export function CommandPalette({
         );
 
       agents
-        .filter((agent) => matches(query, agent.displayName, agent.agentType, agent.description))
+        .filter((agent) => allowed(`/agents/${agent.agentType}`) && matches(query, agent.displayName, agent.agentType, agent.description))
         .slice(0, MAX_PER_GROUP)
         .forEach((agent) =>
           list.push({
@@ -167,6 +172,7 @@ export function CommandPalette({
       approvals
         .filter(
           (approval) =>
+            allowed(`/agents/approvals/${approval.id}`) &&
             approval.status === 'pending' &&
             matches(query, approval.title, approval.storeName, String(approval.id))
         )
@@ -184,7 +190,7 @@ export function CommandPalette({
     }
 
     return list;
-  }, [query, pageShortcuts, stores, agents, approvals, t]);
+  }, [query, pageShortcuts, stores, agents, approvals, t, role]);
 
   useEffect(() => {
     setActiveIndex(0);

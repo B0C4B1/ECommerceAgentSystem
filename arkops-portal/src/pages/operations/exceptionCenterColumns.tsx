@@ -1,13 +1,17 @@
 import {
   AlertOutlined,
   BellOutlined,
+  BranchesOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   EyeOutlined,
   MessageOutlined,
   MinusCircleOutlined,
+  QuestionCircleOutlined,
+  RiseOutlined,
   SafetyOutlined,
   StarOutlined,
+  SwapOutlined,
   ThunderboltOutlined,
   TruckOutlined,
   UndoOutlined,
@@ -36,6 +40,13 @@ function typeIcon(type: ExceptionType) {
     ad_low_roi: <ThunderboltOutlined />,
     logistics_stuck: <TruckOutlined />,
     compliance_flag: <SafetyOutlined />,
+    cycle_escalation: <BranchesOutlined />,
+    cross_store_escalation: <SwapOutlined />,
+    goal_pace_escalation: <RiseOutlined />,
+    goal_settlement: <AlertOutlined />,
+    decision_request: <QuestionCircleOutlined />,
+    guard_health: <SafetyOutlined />,
+    guard_health_account: <SafetyOutlined />,
   };
   return icons[type];
 }

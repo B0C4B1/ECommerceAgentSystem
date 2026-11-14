@@ -2418,6 +2418,23 @@ body {
   color: inherit;
 }
 
+/* P28.4 Agent 健康态：阻塞原因一行一条，右侧直达处理入口 */
+.agent-health-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--ark-muted);
+}
+
+.agent-health-row > a {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 @media (max-width: 768px) {
   .page-title-row {
     align-items: flex-start;

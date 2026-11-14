@@ -60,6 +60,8 @@ import { ordersApi } from '../../api/orders';
 import { storesApi } from '../../api/stores';
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
+import { useStoreScope } from '../../app/storeScope';
+import { usePermission } from '../../app/usePermission';
 import { PageFilterBar } from '../../components/filters/PageFilterBar';
 import { MetricCard } from '../../components/metrics/MetricCard';
 import { PageHeader } from '../../components/PageHeader';
@@ -120,11 +122,13 @@ export function OrderAutomationPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const { scope, setScope } = useStoreScope();
+  const { can } = usePermission();
+  const canUpdateOrders = can('orders', 'update');
+  // Store filtering is shell-level (D3): pages must not keep their own store select.
+  const storeFilter = scope === 'all' ? undefined : scope;
   const [tabFilter, setTabFilter] = useState<TabFilter>('all');
   const [searchKw, setSearchKw] = useState('');
-  const [storeFilter, setStoreFilter] = useState<AllMallId | undefined>(
-    parseAllMallId(searchParams.get('store') ?? undefined)
-  );
   const [dateRange, setDateRange] = useState<[string, string] | null>(null);
   const [exceptionTypeFilter, setExceptionTypeFilter] = useState<OrderExceptionType | undefined>();
   const [slaFilter, setSlaFilter] = useState<'at_risk' | 'breached' | undefined>();
@@ -205,19 +209,25 @@ export function OrderAutomationPage() {
 
   const autoCountBase = baseFiltered.filter((o) => AUTO_FLOW_ORDER_STATUSES.includes(o.status)).length;
   const exceptionCountBase = baseFiltered.filter((o) => EXCEPTION_ORDER_STATUSES.includes(o.status)).length;
-  // Digest counts describe all orders, not the filtered view: they are the page's
-  // headline, and they must not change when the user narrows the table.
-  const atRiskCount = orders.filter((o) => { const tone = slaOf(o).tone; return tone === 'breached' || tone === 'critical'; }).length;
+  // Digest counts follow the shell store scope but ignore the page's own filters: they are
+  // the page's headline, and must not change when the user narrows the table.
+  const scopedOrders = useMemo(
+    () => (storeFilter != null ? orders.filter((o) => o.storeId === storeFilter) : orders),
+    [orders, storeFilter],
+  );
+  const atRiskCount = scopedOrders.filter((o) => { const tone = slaOf(o).tone; return tone === 'breached' || tone === 'critical'; }).length;
   // Only exceptions that are *also* time-critical — the card's helper sits under the
   // exception count, so counting every urgent order there would contradict the number.
-  const exceptionAtRiskCount = baseFiltered.filter((o) => {
+  // Same denominator as the exception KPI card (shell store scope, page filters ignored),
+  // otherwise the helper would contradict the number directly above it.
+  const exceptionAtRiskCount = scopedOrders.filter((o) => {
     const tone = slaOf(o).tone;
     return EXCEPTION_ORDER_STATUSES.includes(o.status) && (tone === 'breached' || tone === 'critical');
   }).length;
   // An exception that is also SLA-critical must not be counted twice.
-  const needsMeCount = orders.filter((o) => isOrderActionable(o, clock)).length;
-  const filtersActive = !!(searchKw || storeFilter != null || dateRange || exceptionTypeFilter || slaFilter || needsMeOnly);
-  const clearFilters = () => { setSearchKw(''); setStoreFilter(undefined); setDateRange(null); setExceptionTypeFilter(undefined); setSlaFilter(undefined); setNeedsMeOnly(false); };
+  const needsMeCount = scopedOrders.filter((o) => isOrderActionable(o, clock)).length;
+  const filtersActive = !!(searchKw || dateRange || exceptionTypeFilter || slaFilter || needsMeOnly);
+  const clearFilters = () => { setSearchKw(''); setDateRange(null); setExceptionTypeFilter(undefined); setSlaFilter(undefined); setNeedsMeOnly(false); };
 
   const filtered = useMemo(() => {
     if (tabFilter === 'auto') return baseFiltered.filter((o) => AUTO_FLOW_ORDER_STATUSES.includes(o.status));
@@ -235,6 +245,16 @@ export function OrderAutomationPage() {
     if (excFromUrl || orders.some((o) => EXCEPTION_ORDER_STATUSES.includes(o.status))) setTabFilter('exception');
   }, [orders, excFromUrl]);
 
+  // Deep-link: /orders?store=<id> switches the shell scope once on mount.
+  const storeFromUrlApplied = useRef(false);
+  useEffect(() => {
+    if (storeFromUrlApplied.current) return;
+    const storeFromUrl = parseAllMallId(searchParams.get('store') ?? undefined);
+    if (storeFromUrl == null) return;
+    storeFromUrlApplied.current = true;
+    setScope(storeFromUrl);
+  }, [searchParams, setScope]);
+
   // Deep-link: /orders?order=<id> opens that order's detail modal once data arrives.
   useEffect(() => {
     if (orderFromUrl == null) return;
@@ -242,10 +262,10 @@ export function OrderAutomationPage() {
     if (target) setDetailOrder(target);
   }, [orders, orderFromUrl]);
 
-  const totalCount = orders.length;
-  const cancelledCount = orders.filter((o) => o.status === 'cancelled').length;
-  const autoHandled = orders.filter((o) => AUTO_FLOW_ORDER_STATUSES.includes(o.status)).length;
-  const exceptionCount = orders.filter((o) => EXCEPTION_ORDER_STATUSES.includes(o.status)).length;
+  const totalCount = scopedOrders.length;
+  const cancelledCount = scopedOrders.filter((o) => o.status === 'cancelled').length;
+  const autoHandled = scopedOrders.filter((o) => AUTO_FLOW_ORDER_STATUSES.includes(o.status)).length;
+  const exceptionCount = scopedOrders.filter((o) => EXCEPTION_ORDER_STATUSES.includes(o.status)).length;
   const rateDenominator = totalCount - cancelledCount;
   const autoRate = rateDenominator > 0 ? Math.round((autoHandled / rateDenominator) * 100) : 0;
 
@@ -255,15 +275,23 @@ export function OrderAutomationPage() {
    */
   const autoLogEntries = useMemo(() => {
     const entries: { key: string; text: string; at: string }[] = [];
-    for (const order of orders) {
+    for (const order of scopedOrders) {
       order.timeline.forEach((step, index) => {
         if (step.automated) entries.push({ key: `${order.id}-${index}`, text: `${step.title} · ${order.orderNo}`, at: step.at });
       });
     }
     return entries.sort((a, b) => dayjs(b.at).valueOf() - dayjs(a.at).valueOf()).slice(0, 20);
-  }, [orders]);
+  }, [scopedOrders]);
 
   // ---- Mutations -----------------------------------------------------------
+  const contactMutation = useMutation({
+    mutationFn: ordersApi.contactBuyer,
+    onSuccess: (order) => {
+      message.success(t('order.contactBuyerSent', { order: order?.orderNo ?? '' }));
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orderSync'] });
+    },
+  });
   const cancelMutation = useMutation({
     mutationFn: (params: { orderId: number; reason: string }) => ordersApi.cancelAndRefund(params.orderId, params.reason),
     onSuccess: () => { message.success(t('order.cancelledAndRefunded')); queryClient.invalidateQueries({ queryKey: ['orders'] }); queryClient.invalidateQueries({ queryKey: ['orderSync'] }); setDetailOrder(null); setPendingAction(null); setActionReason(''); },
@@ -289,7 +317,7 @@ export function OrderAutomationPage() {
     if (pendingAction.type === 'cancel_refund') cancelMutation.mutate({ orderId: pendingAction.order.id, reason: actionReason.trim() });
     else releaseMutation.mutate({ orderId: pendingAction.order.id, reason: actionReason.trim() });
   };
-  const handleContactBuyer = (order: Order) => message.info(`${t('order.contactBuyerMsg')}: ${order.buyerName} (${order.orderNo})`);
+  const handleContactBuyer = (order: Order) => contactMutation.mutate(order.id);
 
   const statusColors: Record<OrderStatus, string> = {
     auto_processing: 'blue', awaiting_shipment: 'geekblue', auto_shipped: 'cyan',
@@ -333,7 +361,7 @@ export function OrderAutomationPage() {
         return (
           <div onClick={(event) => event.stopPropagation()}>
             <TableActionGroup>
-              {isException && tier2 && (
+              {isException && tier2 && canUpdateOrders && (
                 <Popconfirm
                   title={t('ordersv2.applyRecommendationTitle')}
                   description={<Typography.Text style={{ fontSize: 12 }}>{tier2.rationale}</Typography.Text>}
@@ -346,7 +374,7 @@ export function OrderAutomationPage() {
                   </Button>
                 </Popconfirm>
               )}
-              {isException && record.status === 'fraud_blocked' && (
+              {isException && record.status === 'fraud_blocked' && canUpdateOrders && (
                 <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={() => openRiskyAction('fraud_release', record)}>{t('order.approve')}</Button>
               )}
               {/* Contact-buyer and cancel/refund stay in the detail modal: four buttons do
@@ -402,7 +430,6 @@ export function OrderAutomationPage() {
   const orderFilters = (
     <PageFilterBar>
       <Input prefix={<SearchOutlined />} placeholder={t('order.searchPlaceholder')} allowClear value={searchKw} onChange={(e) => setSearchKw(e.target.value)} />
-      <Select allowClear placeholder={t('order.filterStore')} value={storeFilter} onChange={setStoreFilter} options={stores.map((store) => ({ value: store.id, label: store.name }))} />
       <Button
         type={needsMeOnly ? 'primary' : 'default'}
         icon={<ExclamationCircleOutlined />}
@@ -458,9 +485,11 @@ export function OrderAutomationPage() {
               {' · '}{t('ordersv2.syncCadence')}
             </Typography.Text>
           </Space>
-          <Button size="small" icon={<SyncOutlined spin={resyncMutation.isPending} />} loading={resyncMutation.isPending} onClick={() => resyncMutation.mutate()}>
-            {syncResult?.status === 'failed' ? t('ordersv2.retryNow') : t('ordersv2.syncNow')}
-          </Button>
+          {canUpdateOrders && (
+            <Button size="small" icon={<SyncOutlined spin={resyncMutation.isPending} />} loading={resyncMutation.isPending} onClick={() => resyncMutation.mutate()}>
+              {syncResult?.status === 'failed' ? t('ordersv2.retryNow') : t('ordersv2.syncNow')}
+            </Button>
+          )}
         </div>
 
         <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
@@ -536,7 +565,7 @@ export function OrderAutomationPage() {
           />
         </Col>
         <Col xs={12} sm={6}>
-          <div onClick={() => { setNeedsMeOnly(false); setTabFilter(tabFilter === 'exception' ? 'all' : 'exception'); }} style={{ cursor: 'pointer' }}>
+          <div onClick={() => { clearFilters(); setTabFilter(tabFilter === 'exception' ? 'all' : 'exception'); }} style={{ cursor: 'pointer' }}>
             <MetricCard
               className="stat-card stat-card-warning"
               title={t('order.exceptionCount')}
@@ -626,10 +655,12 @@ export function OrderAutomationPage() {
                 {detailOrder.status === 'exception' && (
                   <>
                     <Button icon={<MailOutlined />} onClick={() => { handleContactBuyer(detailOrder); setDetailOrder(null); }}>{t('order.contactBuyer')}</Button>
-                    <Button danger icon={<CloseOutlined />} type="primary" onClick={() => openRiskyAction('cancel_refund', detailOrder)}>{t('order.cancelRefund')}</Button>
+                    {canUpdateOrders && (
+                      <Button danger icon={<CloseOutlined />} type="primary" onClick={() => openRiskyAction('cancel_refund', detailOrder)}>{t('order.cancelRefund')}</Button>
+                    )}
                   </>
                 )}
-                {detailOrder.status === 'fraud_blocked' && (
+                {detailOrder.status === 'fraud_blocked' && canUpdateOrders && (
                   <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => openRiskyAction('fraud_release', detailOrder)}>{t('order.approveRelease')}</Button>
                 )}
               </>

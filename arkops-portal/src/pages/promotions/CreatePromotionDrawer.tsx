@@ -2,13 +2,20 @@
  * Create Promotion Drawer — V1.1
  * Form to create a new promotion campaign (flash_sale, seckill, coupon, bundle, full_reduction).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useI18n } from '../../app/i18n';
 import {
   Button, DatePicker, Drawer, Form, Input, InputNumber, Select, Space, Typography,
 } from 'antd';
 import dayjs from 'dayjs';
 import type { AllMallId, PromotionCampaign, PromotionType, Store, Product } from '../../types/domain';
+
+/** Fields carried over from an AI suggestion when the drawer is opened from one. */
+export interface PromotionDefaults {
+  name: string;
+  type: PromotionType;
+  discount: number;
+}
 
 interface Props {
   open: boolean;
@@ -17,6 +24,7 @@ interface Props {
   loading: boolean;
   stores: Store[];
   products: Product[];
+  defaults?: PromotionDefaults | null;
 }
 
 const TYPE_OPTIONS: { value: PromotionType; labelKey: string }[] = [
@@ -27,9 +35,16 @@ const TYPE_OPTIONS: { value: PromotionType; labelKey: string }[] = [
   { value: 'full_reduction', labelKey: 'promotions.fullReduction' },
 ];
 
-export function CreatePromotionDrawer({ open, onClose, onCreate, loading, stores, products }: Props) {
+export function CreatePromotionDrawer({ open, onClose, onCreate, loading, stores, products, defaults }: Props) {
   const { t } = useI18n();
   const [form] = Form.useForm();
+
+  // Every open starts from a clean form; an AI suggestion only pre-fills the fields it knows.
+  useEffect(() => {
+    if (!open) return;
+    form.resetFields();
+    if (defaults) form.setFieldsValue(defaults);
+  }, [open, defaults, form]);
 
   const handleSubmit = () => {
     form.validateFields().then((values) => {
@@ -49,8 +64,9 @@ export function CreatePromotionDrawer({ open, onClose, onCreate, loading, stores
     });
   };
 
-  // Filter products by selected store
+  // Products follow the chosen store so a campaign cannot mix SKUs across stores.
   const [selectedStore, setSelectedStore] = useState<AllMallId | undefined>();
+  const productOptions = selectedStore ? products.filter((p) => p.primaryStoreId === selectedStore) : products;
 
   return (
     <Drawer
@@ -81,7 +97,10 @@ export function CreatePromotionDrawer({ open, onClose, onCreate, loading, stores
           <Select
             options={stores.map((s) => ({ value: s.id, label: s.name }))}
             placeholder={t('promotions.selectStore')}
-            onChange={(val) => setSelectedStore(val)}
+            onChange={(val) => {
+              setSelectedStore(val);
+              form.setFieldValue('productIds', undefined);
+            }}
           />
         </Form.Item>
 
@@ -89,7 +108,7 @@ export function CreatePromotionDrawer({ open, onClose, onCreate, loading, stores
           <Select
             mode="multiple"
             placeholder={t('promotions.selectProducts')}
-            options={products.map((p) => ({ value: p.id, label: `${p.name} (${p.spuCode})` }))}
+            options={productOptions.map((p) => ({ value: p.id, label: `${p.name} (${p.spuCode})` }))}
             maxTagCount={3}
           />
         </Form.Item>

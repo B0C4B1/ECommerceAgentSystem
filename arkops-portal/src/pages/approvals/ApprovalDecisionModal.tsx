@@ -19,7 +19,7 @@ import { ArrowRightOutlined } from '@ant-design/icons';
 import { Alert, Input, Modal, Space, Tag, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { useI18n } from '../../app/i18n';
-import { getPolicyForRisk } from '../../api/approvalPolicies';
+import { resolveApprovalRequirement } from '../../api/operatingModel';
 import { computeEvidenceDelta } from '../inbox/urgency';
 import type { Approval } from '../../types/domain';
 
@@ -51,8 +51,9 @@ export function ApprovalDecisionModal({ approval, decision, submitting, onCancel
   }
 
   const isApprove = decision === 'approved';
-  const policy = getPolicyForRisk(approval.riskLevel);
-  const isDual = policy?.action === 'dual_approval';
+  const requirement =
+    approval.requirement ?? resolveApprovalRequirement(approval.storeId, approval.agentType, approval.riskLevel);
+  const isDual = requirement === 'dual';
   const completedApprovals = approval.priorApprovals?.length ?? 0;
   const isFirstOfDual = isApprove && isDual && completedApprovals + 1 < 2;
 

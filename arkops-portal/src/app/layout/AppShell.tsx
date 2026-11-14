@@ -43,15 +43,20 @@ import {
   TeamOutlined,
   ThunderboltOutlined,
   QuestionCircleOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
-import { Avatar, Badge, Button, Divider, Drawer, Dropdown, Layout, Menu, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd';
+import { Avatar, Badge, Button, Divider, Drawer, Dropdown, Layout, Menu, Popconfirm, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useDemoMode } from '../demoMode';
 import { LANGUAGE_SWITCHER_ENABLED, useI18n } from '../i18n';
+import type { TranslationKey } from '../i18n';
 import { useStoreScope } from '../storeScope';
 import { useTheme } from '../theme';
 import { dashboardApi } from '../../api/dashboard';
-import { useQuery } from '@tanstack/react-query';
+import { exceptionsApi } from '../../api/exceptions';
+import { orchestratorApi } from '../../api/orchestrator';
+import { resetMockPersistence } from '../../api/mockPersistence';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth';
 import { getAccessiblePaths } from '../rolePermissions';
 import type { Role } from '../rolePermissions';
@@ -103,9 +108,32 @@ const routeMenuPrefixes = [
 /** 业务运营 group members — used to auto-open the group and fold reports into the dashboard. */
 const BUSINESS_GROUP_PATHS = ['/customer-service', '/reviews', '/promotions', '/ads', '/inventory', '/livestream'];
 
+/** Sidebar entry → page-title key, so the browser tab matches the active navigation item. */
+const ROUTE_TITLE_KEYS: Record<string, TranslationKey> = {
+  '/dashboard': 'nav.dashboard',
+  // /reports is folded into the dashboard menu item but is its own page.
+  '/reports': 'nav.reports',
+  '/stores': 'nav.storeManagement',
+  '/products': 'nav.products',
+  '/orders': 'nav.orders',
+  '/inbox': 'nav.todoCenter',
+  '/customer-service': 'nav.customerService',
+  '/reviews': 'nav.reviews',
+  '/promotions': 'nav.promotions',
+  '/ads': 'nav.ads',
+  '/inventory': 'nav.inventory',
+  '/livestream': 'nav.live',
+  '/setup': 'nav.automationConfig',
+  '/settings/members': 'nav.memberManagement',
+  '/settings/models': 'nav.models',
+  '/settings/notifications': 'nav.notificationSettings',
+  '/settings/audit-logs': 'nav.auditLogs',
+  '/settings/billing': 'nav.planBilling',
+  '/settings/guide': 'nav.helpCenter',
+};
+
 function getSelectedMenuKey(pathname: string) {
   if (pathname === '/') return '/dashboard';
-  if (pathname === '/settings/stores') return '/stores';
   // settings sub-items match their exact path
   if (pathname.startsWith('/settings/')) return pathname;
   // store workflow pages belong to the top-level Store Management item
@@ -113,6 +141,8 @@ function getSelectedMenuKey(pathname: string) {
   // D9: the exception/approval centres are folded into the inbox; only the approval
   // detail page remains under /agents/approvals/:id and it belongs to the inbox entry.
   if (pathname.startsWith('/agents/approvals')) return '/inbox';
+  // Legacy approval detail URL (/approvals/:id) still resolves — keep the inbox highlighted.
+  if (pathname.startsWith('/approvals')) return '/inbox';
   // D10: the sidebar entry is 自动化配置 (/setup) — the scenario surface. The per-agent
   // pages under /agents are the "expert view" reached from a button there, not their own
   // nav item, so they highlight the 自动化配置 entry.
@@ -170,6 +200,34 @@ export function AppShell() {
   });
 
   const hasBusinessData = user?.experience !== 'onboarding';
+  const queryClient = useQueryClient();
+
+  /**
+   * P35.1 进入应用即触发一轮治理自巡检：目标结算、节奏/护栏升级、决策规则与超时默认
+   * 这些 Agent 职责不再等人打开工作台或收件箱才发生。幂等，只回变化量。
+   */
+  useEffect(() => {
+    if (!hasBusinessData) return;
+    let cancelled = false;
+    orchestratorApi
+      .runGovernanceSweep()
+      .then((sweep) => {
+        if (cancelled || !sweep.changed) return;
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+        queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
+        queryClient.invalidateQueries({ queryKey: ['goalPeriod'] });
+        queryClient.invalidateQueries({ queryKey: ['goalPace'] });
+        queryClient.invalidateQueries({ queryKey: ['guardHealth'] });
+        queryClient.invalidateQueries({ queryKey: ['guardChanges'] });
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [hasBusinessData, queryClient]);
+
   const pendingApprovals = hasBusinessData ? dashboard?.pendingApprovals ?? 0 : 0;
   const exceptionPending = hasBusinessData ? dashboard?.exceptionCenterPending ?? 0 : 0;
   const orderExceptions = hasBusinessData ? dashboard?.orderExceptions ?? 0 : 0;
@@ -284,6 +342,12 @@ export function AppShell() {
   const experienceLabel =
     user?.experience === 'onboarding' ? t('shell.newMerchant') : t('shell.establishedMerchant');
 
+  // Keep the browser tab in sync with the page so multi-tab operators can tell them apart.
+  useEffect(() => {
+    const titleKey = ROUTE_TITLE_KEYS[location.pathname] ?? ROUTE_TITLE_KEYS[getSelectedMenuKey(location.pathname)];
+    document.title = titleKey ? `${t(titleKey)} · AllMall` : 'AllMall Portal';
+  }, [location.pathname, t]);
+
   // Identity panel (E3): user summary + demo "view as" role switcher + logout in one place.
   const identityPanel = (
     <div className="identity-menu">
@@ -330,6 +394,93 @@ export function AppShell() {
       <Button block icon={<LogoutOutlined />} onClick={handleLogout}>
         {t('shell.logout')}
       </Button>
+    </div>
+  );
+
+  // P30.5：指派通知。Agent 或人把升级交给某成员后，按成员名或角色推到这个铃铛，
+  // 人不必先打开待办中心逐条找「哪条归我」；通知只做站内，外部渠道未接入。
+  const { data: notices, refetch: refetchNotices } = useQuery({
+    queryKey: ['escalation-notices'],
+    queryFn: exceptionsApi.listNotices,
+    refetchInterval: 30_000,
+  });
+  const myNotices = (notices ?? []).filter(
+    (notice) => notice.recipientName === user?.name || notice.recipientRole === user?.role,
+  );
+  const unreadNotices = myNotices.filter((notice) => !notice.readAt);
+  const bellCount = hasBusinessData ? (unreadNotices.length > 0 ? unreadNotices.length : inboxCount) : 0;
+
+  const openInboxFromNotice = (noticeId?: string) => {
+    const task = noticeId ? exceptionsApi.markNoticesRead([noticeId]) : Promise.resolve();
+    void task.then(() => refetchNotices());
+    navigate('/inbox');
+  };
+
+  const noticePanel = (
+    <div className="identity-menu" style={{ width: 340 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography.Text strong>{t('shell.noticesTitle')}</Typography.Text>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {t('shell.noticesUnread', { count: unreadNotices.length })}
+        </Typography.Text>
+      </div>
+      {myNotices.length === 0 ? (
+        <Typography.Text type="secondary" style={{ display: 'block', padding: '10px 0', fontSize: 12 }}>
+          {t('shell.noticesEmpty')}
+        </Typography.Text>
+      ) : (
+        <div style={{ marginTop: 8 }}>
+          {myNotices.slice(0, 5).map((notice) => (
+            <button
+              type="button"
+              key={notice.id}
+              onClick={() => openInboxFromNotice(notice.id)}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '8px 6px',
+                border: 'none',
+                borderLeft: notice.readAt ? '3px solid transparent' : '3px solid var(--ark-blue, #1677ff)',
+                background: 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              <Typography.Text strong={!notice.readAt} style={{ display: 'block', fontSize: 13 }}>
+                {notice.title}
+              </Typography.Text>
+              <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                {notice.storeName} · {notice.reason}
+              </Typography.Text>
+              <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
+                {t('shell.noticeAssignedTo', {
+                  name: notice.recipientName,
+                  role: t(`member.role.${notice.recipientRole}` as TranslationKey),
+                })}
+              </Typography.Text>
+            </button>
+          ))}
+        </div>
+      )}
+      <Divider style={{ margin: '8px 0' }} />
+      <Space size={4} wrap>
+        <Button type="link" size="small" onClick={() => openInboxFromNotice()}>
+          {t('shell.noticesOpenInbox', { count: inboxCount })}
+        </Button>
+        {unreadNotices.length > 0 && (
+          <Button
+            type="link"
+            size="small"
+            onClick={() => {
+              void exceptionsApi
+                .markAllNoticesRead({ name: user?.name, role: user?.role ?? undefined })
+                .then(() => refetchNotices());
+            }}
+          >
+            {t('shell.noticesMarkAllRead')}
+          </Button>
+        )}
+      </Space>
     </div>
   );
 
@@ -445,9 +596,11 @@ export function AppShell() {
               title={t('shell.searchOpen')}
               onClick={() => setPaletteOpen(true)}
             />
-            {/* WS-B (B2): bell links to the Action Inbox with a live count badge */}
-            <Badge count={inboxCount} size="small" offset={[-4, 4]}>
-              <Button icon={<BellOutlined />} onClick={() => navigate('/inbox')}>{t('app.alerts')}</Button>
+            {/* WS-B (B2): bell opens assigned-escalation notices (P30.5) with a live unread badge */}
+            <Badge count={bellCount} size="small" offset={[-4, 4]}>
+              <Dropdown trigger={['click']} placement="bottomRight" dropdownRender={() => noticePanel}>
+                <Button icon={<BellOutlined />}>{t('app.alerts')}</Button>
+              </Dropdown>
             </Badge>
             <Dropdown trigger={['click']} placement="bottomRight" dropdownRender={() => identityPanel}>
               <button type="button" className="header-identity" aria-label={t('shell.currentRole')}>
@@ -474,9 +627,22 @@ export function AppShell() {
                 </Typography.Text>
                 <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>{t('shell.demoScenarioTag')}</Tag>
               </Space>
-              <Button size="small" type="text" icon={<CloseOutlined />} onClick={exitDemo} className="demo-banner-exit">
-                {t('app.exitDemo')}
-              </Button>
+              <Space size={4}>
+                <Popconfirm
+                  title={t('app.resetMockTitle')}
+                  description={t('app.resetMockDesc')}
+                  okText={t('app.resetMockConfirm')}
+                  cancelText={t('common.cancel')}
+                  onConfirm={resetMockPersistence}
+                >
+                  <Button size="small" type="text" icon={<ReloadOutlined />}>
+                    {t('app.resetMock')}
+                  </Button>
+                </Popconfirm>
+                <Button size="small" type="text" icon={<CloseOutlined />} onClick={exitDemo} className="demo-banner-exit">
+                  {t('app.exitDemo')}
+                </Button>
+              </Space>
             </div>
           )}
           <Outlet />

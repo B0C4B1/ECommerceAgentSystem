@@ -133,7 +133,6 @@ The sidebar is ordered around merchant tasks: Overview → Stores → Products �
 | `/agents/exceptions` | — | Redirect (D9) | Redirects to `/inbox?type=exception`; the page merged into the inbox tabs. |
 | `/agents/approvals` | — | Redirect (D9) | Redirects to `/inbox?type=approval`; the page merged into the inbox tabs. |
 | `/agents/approvals/:approvalId` | Approval Detail | Implemented | Approve or reject high-risk actions. |
-| `/settings/stores` | Store Settings Entry | Implemented | Store management entry within Settings. |
 | `/settings/models` | Model Center | Implemented | Agent model assignment, custom models, monthly usage. |
 | `/settings/audit-logs` | Audit Logs | Implemented | System and execution audit records. |
 | `/settings/billing` | Billing Ledger | Implemented | Usage, monthly cost, bills, invoices. |
@@ -427,7 +426,7 @@ Use this table as the first stop when a collaborator or AI coding tool needs to 
 | Path | Type | Purpose | Change when |
 | --- | --- | --- | --- |
 | `README.md` | Documentation | Frontend implementation guide, directory map, collaboration rules, and AI-assisted coding workflow. | Project structure, coding workflow, navigation, or collaboration conventions change. |
-| `docs/product/` | Documentation | Product roadmaps, PRDs, reviews, audit records, and business scenarios. | Product requirements or review evidence change. |
+| `docs/product/` | Documentation | Product change log, roadmap, competitive analysis, and unmaintained raw notes. | Feature decisions, release status, or competitive findings change. |
 | `docs/integration/` | Documentation | Frontend API/data contracts and external login gateway integration references. | API contracts or integration behavior change. |
 | `product-design.md` | Product spec | Canonical product scope for navigation, roles, modules, and roadmap. | Page scope, navigation, user roles, or module behavior changes. |
 | `package.json` | Config | Defines scripts and frontend dependencies. | Adding/removing packages or scripts. |

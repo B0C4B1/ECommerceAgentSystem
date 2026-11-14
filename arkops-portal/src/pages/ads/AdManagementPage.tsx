@@ -6,14 +6,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
   RobotOutlined, LineChartOutlined, PictureOutlined,
-  PlayCircleOutlined, PauseCircleOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
 import { Button, Card, Col, Empty, Modal, Progress, Row, Select, Space, Statistic, Table, Tag, Tabs, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
 import { adsApi } from '../../api/ads';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { useStoreScope } from '../../app/storeScope';
+import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import { TrendBarChart } from '../../components/charts/TrendBarChart';
@@ -27,6 +28,16 @@ const STATUS_TAG: Record<string, { color: string; labelKey: string }> = {
 const PLATFORM_TAG: Record<string, string> = {
   douyin: '抖音', pinduoduo: '拼多多', taobao: '淘宝', jd: '京东',
 };
+const CREATIVE_TYPE_KEYS: Record<string, string> = {
+  video: 'ads.creative.typeVideo',
+  carousel: 'ads.creative.typeCarousel',
+  image: 'ads.creative.typeImage',
+};
+const CREATIVE_STATUS_KEYS: Record<string, string> = {
+  approved: 'ads.creative.approved',
+  pending: 'ads.creative.pending',
+  rejected: 'ads.creative.rejected',
+};
 
 function formatNum(n: number): string {
   if (n >= 10000) return `${(n / 10000).toFixed(1)}万`;
@@ -39,7 +50,11 @@ function formatCurrency(n: number): string {
 
 export function AdManagementPage() {
   const { t } = useI18n();
-  const [storeFilter, setStoreFilter] = useState<AllMallId | undefined>();
+  const { scope } = useStoreScope();
+  const { can } = usePermission();
+  const canUpdateAds = can('ads', 'update');
+  // Store filtering is shell-level (D3); the page no longer owns a store select.
+  const storeFilter = scope === 'all' ? undefined : scope;
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [platformFilter, setPlatformFilter] = useState<string | undefined>();
   const [creativeModalCampaign, setCreativeModalCampaign] = useState<AdCampaign | null>(null);
@@ -49,8 +64,8 @@ export function AdManagementPage() {
     queryKey: ['ads', storeFilter, statusFilter, platformFilter],
     queryFn: () => adsApi.list({ storeId: storeFilter, status: statusFilter, platform: platformFilter }),
   });
-  const { data: overview } = useQuery({ queryKey: ['adsOverview'], queryFn: adsApi.getOverview });
-  const { data: trend = [] } = useQuery({ queryKey: ['adsTrend'], queryFn: adsApi.getTrend });
+  const { data: overview } = useQuery({ queryKey: ['adsOverview', storeFilter], queryFn: () => adsApi.getOverview(storeFilter) });
+  const { data: trend = [] } = useQuery({ queryKey: ['adsTrend', storeFilter], queryFn: () => adsApi.getTrend(storeFilter) });
 
   if (stores.length === 0) return <StoreConnectionEmptyState description={t('ads.emptyNoStore')} />;
 
@@ -95,10 +110,7 @@ export function AdManagementPage() {
     {
       title: t('ads.actions'), key: 'actions', width: 100, fixed: 'right',
       render: (_: unknown, r: AdCampaign) => (
-        <Space>
-          <Button size="small" type="link" icon={<LineChartOutlined />} onClick={() => {}}>{t('ads.detail')}</Button>
-          <Button size="small" type="link" icon={<PictureOutlined />} onClick={() => setCreativeModalCampaign(r)}>{t('ads.creatives')}</Button>
-        </Space>
+        <Button size="small" type="link" icon={<PictureOutlined />} onClick={() => setCreativeModalCampaign(r)}>{t('ads.creatives')}</Button>
       ),
     },
   ];
@@ -116,20 +128,20 @@ export function AdManagementPage() {
         <Col xs={12} sm={6}><Card size="small"><Statistic title={t('ads.avgRoi')} value={`${overview?.avgRoi ?? 0}x`} valueStyle={{ color: 'var(--ark-purple)', fontSize: 20 }} /></Card></Col>
       </Row>
 
-      {/* Filters */}
-      <div style={{ padding: '0 24px 12px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <Select value={storeFilter} onChange={setStoreFilter} allowClear placeholder={t('cs.filterByStore')} style={{ width: 140 }} options={stores.map((s) => ({ value: s.id, label: s.name }))} />
-        <Select value={statusFilter} onChange={setStatusFilter} allowClear placeholder={t('ads.filterStatus')} style={{ width: 120 }} options={['active', 'paused', 'ended'].map((v) => ({ value: v, label: t(STATUS_TAG[v]?.labelKey ?? v) }))} />
-        <Select value={platformFilter} onChange={setPlatformFilter} allowClear placeholder={t('ads.filterPlatform')} style={{ width: 120 }} options={['douyin', 'pinduoduo', 'taobao', 'jd'].map((v) => ({ value: v, label: PLATFORM_TAG[v] }))} />
-      </div>
-
       {/* Content */}
       <Tabs defaultActiveKey="campaigns" style={{ flex: 1, padding: '0 24px', overflow: 'auto' }} tabBarStyle={{ marginBottom: 12 }}
         items={[
           {
             key: 'campaigns', label: <><LineChartOutlined />{t('ads.campaignsTab')}</>,
             children: (
-              <Table<AdCampaign> rowKey="id" columns={columns} dataSource={campaigns} pagination={{ pageSize: 15 }} size="middle" scroll={{ x: 1300 }} locale={{ emptyText: <Empty description={t('ads.noCampaigns')} /> }} />
+              <>
+                {/* Filters belong to the campaign list only — the trend and AI tabs are not filtered. */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <Select value={statusFilter} onChange={setStatusFilter} allowClear placeholder={t('ads.filterStatus')} style={{ width: 120 }} options={['active', 'paused', 'ended'].map((v) => ({ value: v, label: t(STATUS_TAG[v]?.labelKey ?? v) }))} />
+                  <Select value={platformFilter} onChange={setPlatformFilter} allowClear placeholder={t('ads.filterPlatform')} style={{ width: 120 }} options={['douyin', 'pinduoduo', 'taobao', 'jd'].map((v) => ({ value: v, label: PLATFORM_TAG[v] }))} />
+                </div>
+                <Table<AdCampaign> rowKey="id" columns={columns} dataSource={campaigns} pagination={{ pageSize: 15 }} size="middle" scroll={{ x: 1300 }} locale={{ emptyText: <Empty description={t('ads.noCampaigns')} /> }} />
+              </>
             ),
           },
           {
@@ -147,7 +159,7 @@ export function AdManagementPage() {
                   }))}
                 />
               </Card>
-            ) : <Empty />,
+            ) : <Empty description={t('ads.noTrend')} />,
           },
           {
             key: 'agent', label: <><RobotOutlined />{t('ads.aiOptimizeTab')}</>,
@@ -161,7 +173,6 @@ export function AdManagementPage() {
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                     {t('ads.aiOptimizeDesc')}
                   </Typography.Text>
-                  <Button type="primary" ghost icon={<RobotOutlined />} onClick={() => message.info(t('ads.aiRunMock'))}>{t('ads.aiRunOptimize')}</Button>
                 </Space>
               </Card>
             ),
@@ -190,8 +201,8 @@ function CreativeModal({ campaign, onClose, stores }: { campaign: AdCampaign | n
     {
       title: t('ads.creative.type'), dataIndex: 'type',
       render: (v: string) => {
-        const icon = v === 'video' ? <PlayCircleOutlined /> : v === 'carousel' ? <PictureOutlined /> : <PictureOutlined />;
-        return <Tag icon={icon}>{v}</Tag>;
+        const icon = v === 'video' ? <PlayCircleOutlined /> : <PictureOutlined />;
+        return <Tag icon={icon}>{t(CREATIVE_TYPE_KEYS[v] ?? v)}</Tag>;
       },
     },
     { title: t('ads.creative.impressions'), dataIndex: ['performance', 'impressions'], align: 'right', render: (v: number) => formatNum(v) },
@@ -200,7 +211,7 @@ function CreativeModal({ campaign, onClose, stores }: { campaign: AdCampaign | n
       title: t('ads.creative.status'), dataIndex: 'status',
       render: (v: string) => {
         const colors: Record<string, string> = { approved: 'green', pending: 'orange', rejected: 'red' };
-        return <Tag color={colors[v]}>{v}</Tag>;
+        return <Tag color={colors[v]}>{t(CREATIVE_STATUS_KEYS[v] ?? v)}</Tag>;
       },
     },
   ];

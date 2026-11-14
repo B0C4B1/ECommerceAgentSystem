@@ -18,7 +18,9 @@
  */
 import dayjs from 'dayjs';
 import { getPolicyForRisk } from '../../api/approvalPolicies';
+import { resolveApprovalRequirement } from '../../api/operatingModel';
 import type { Approval, ApprovalEvidenceField, ApprovalPolicy } from '../../types/domain';
+import type { EscalationDecision } from '../operations/exceptionCenterMockData';
 
 export type UrgencyTone = 'safe' | 'warning' | 'critical';
 
@@ -46,14 +48,47 @@ type TFunction = (key: string, params?: Record<string, string | number>) => stri
  * Returns undefined when no policy exists for the risk level.
  */
 export function getApprovalUrgency(approval: Approval, at: dayjs.Dayjs = dayjs()): ApprovalUrgency | undefined {
-  const policy = getPolicyForRisk(approval.riskLevel);
-  if (!policy) return undefined;
+  const base = getPolicyForRisk(approval.riskLevel);
+  if (!base) return undefined;
+  // 与决策接口同口径：优先使用落库 requirement，否则按店铺自主等级实时解析，
+  // 避免详情页显示“双人 1/2”但一次通过就终态。
+  const requirement =
+    approval.requirement ?? resolveApprovalRequirement(approval.storeId, approval.agentType, approval.riskLevel);
+  const policy: ApprovalPolicy = {
+    ...base,
+    action: requirement === 'dual' ? 'dual_approval' : 'single_approval'
+  };
   const expiresAt = dayjs(approval.requestedAt).add(policy.timeoutHours, 'hour');
   const windowMs = policy.timeoutHours * 3600_000;
   const remainingMs = expiresAt.diff(at);
   const fractionLeft = Math.max(0, Math.min(1, remainingMs / windowMs));
   const tone: UrgencyTone = fractionLeft <= 0.25 ? 'critical' : fractionLeft <= 0.5 ? 'warning' : 'safe';
   return { policy, expiresAt, remainingMs, fractionLeft, tone };
+}
+
+/**
+ * P40.1：决策请求的等待窗口。截止时间锚定在条目首次登记时（巡检不再刷新），
+ * 人才能看到「还剩多久由 Agent 替我收尾」，而不是每轮巡检后都剩满额。
+ */
+export interface DecisionUrgency {
+  deadline: dayjs.Dayjs;
+  /** milliseconds until the timeout conclusion; <= 0 means the Agent should close it */
+  remainingMs: number;
+  fractionLeft: number;
+  tone: UrgencyTone;
+}
+
+export function getDecisionUrgency(
+  decision: EscalationDecision,
+  at: dayjs.Dayjs = dayjs(),
+): DecisionUrgency {
+  const deadline = dayjs(decision.deadline);
+  const windowMs = Math.max(1, decision.timeoutHours) * 3600_000;
+  const remainingMs = deadline.diff(at);
+  const fractionLeft = Math.max(0, Math.min(1, remainingMs / windowMs));
+  const tone: UrgencyTone =
+    remainingMs <= 0 ? 'critical' : fractionLeft <= 0.25 ? 'critical' : fractionLeft <= 0.5 ? 'warning' : 'safe';
+  return { deadline, remainingMs, fractionLeft, tone };
 }
 
 /** "刚刚 / X 分钟前 / X 小时前 / X 天前" for a past timestamp. */

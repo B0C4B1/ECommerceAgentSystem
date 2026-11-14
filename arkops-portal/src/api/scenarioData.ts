@@ -11,6 +11,7 @@
 import { mockDelay } from './client';
 import { agentConfigs } from './agentMockData';
 import { recordAuditLog } from './auditLogger';
+import { registerMockState } from './mockPersistence';
 import type {
   AgentType,
   AutonomyLevel,
@@ -117,22 +118,41 @@ export function scenarioRiskLevel(def: ScenarioDefinition): RiskLevel {
   return max;
 }
 
-/** Earned-trust suggestion threshold (S3): after N approved runs, prompt to loosen. */
-export const TRUST_STREAK_THRESHOLD = 10;
-
 /** Mutable mock runtime state — module-level, survives navigation within a session. */
 const scenarioStates: ScenarioState[] = [
-  { key: 'pricing_promo', enabled: false, autonomy: 'L1', approvedRunsStreak: 26, trustSuggestionDismissed: false, storeOverrides: {} },
-  { key: 'cs_aftersales', enabled: false, autonomy: 'L1', approvedRunsStreak: 41, trustSuggestionDismissed: false, storeOverrides: {} },
-  { key: 'inventory', enabled: false, autonomy: 'L2', approvedRunsStreak: 7, trustSuggestionDismissed: false, storeOverrides: {} },
-  { key: 'fulfillment_risk', enabled: false, autonomy: 'L1', approvedRunsStreak: 3, trustSuggestionDismissed: false, storeOverrides: {} },
-  { key: 'listing_content', enabled: false, autonomy: 'L1', approvedRunsStreak: 12, trustSuggestionDismissed: false, storeOverrides: {} },
+  { key: 'pricing_promo', enabled: false, autonomy: 'L1', trustSuggestionDismissed: false, storeOverrides: {} },
+  { key: 'cs_aftersales', enabled: false, autonomy: 'L1', trustSuggestionDismissed: false, storeOverrides: {} },
+  { key: 'inventory', enabled: false, autonomy: 'L2', trustSuggestionDismissed: false, storeOverrides: {} },
+  { key: 'fulfillment_risk', enabled: false, autonomy: 'L1', trustSuggestionDismissed: false, storeOverrides: {} },
+  { key: 'listing_content', enabled: false, autonomy: 'L1', trustSuggestionDismissed: false, storeOverrides: {} },
 ];
+
+/** 刷新持久化：场景自主等级与信任累计是“人划护栏”的结果，刷新后必须保留。 */
+registerMockState(
+  'scenarioStates',
+  () => ({ states: scenarioStates }),
+  (value) => {
+    const data = value as { states?: ScenarioState[] } | null;
+    if (!data?.states) return;
+    scenarioStates.length = 0;
+    scenarioStates.push(...data.states);
+  },
+);
 
 function getState(key: ScenarioKey): ScenarioState {
   const state = scenarioStates.find((s) => s.key === key);
   if (!state) throw new Error(`Unknown scenario: ${key}`);
   return state;
+}
+
+/** 场景默认自主等级 — 店铺级策略未覆盖时的回退值。 */
+export function getScenarioAutonomy(key: ScenarioKey): AutonomyLevel {
+  return getState(key).autonomy;
+}
+
+/** agentType → 所属场景（用于把审批动作映射回场景策略）。 */
+export function getScenarioForAgent(agentType: string): ScenarioKey | undefined {
+  return scenarioDefinitions.find((def) => def.agents.includes(agentType as AgentType))?.key;
 }
 
 /**

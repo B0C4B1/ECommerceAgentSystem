@@ -2,18 +2,22 @@
  * Inventory Management Page — V1.1
  * Full inventory overview with replenish suggestions, transfers, and safety stock config.
  */
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   WarningOutlined, ShopOutlined, SyncOutlined, RocketOutlined,
   DashboardOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Card, Col, Empty, Modal, Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Empty, Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { inventoryApi } from '../../api/inventory';
+import { productsApi } from '../../api/products';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { useStoreScope } from '../../app/storeScope';
+import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import type { AllMallId, InventoryItem, ReplenishSuggestion, SafetyStockConfig, TransferRecommendation } from '../../types/domain';
@@ -36,24 +40,67 @@ function formatCurrency(n: number): string {
 
 export function InventoryManagementPage() {
   const { t } = useI18n();
-  const [storeFilter, setStoreFilter] = useState<AllMallId | undefined>();
-  const [alertFilter, setAlertFilter] = useState<string | undefined>();
+  const { scope } = useStoreScope();
+  const { can } = usePermission();
+  const queryClient = useQueryClient();
+  const canUpdateInventory = can('inventory', 'update');
+  // Store filtering is shell-level (D3); the page no longer owns a store select.
+  const storeFilter = scope === 'all' ? undefined : scope;
+  const [searchParams] = useSearchParams();
+  const [alertFilter, setAlertFilter] = useState<string | undefined>(searchParams.get('alert') ?? undefined);
 
   const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: storesApi.list });
   const { data: items = [] } = useQuery({
     queryKey: ['inventory', storeFilter, alertFilter],
     queryFn: () => inventoryApi.list({ storeId: storeFilter, alertLevel: alertFilter }),
   });
-  const { data: overview } = useQuery({ queryKey: ['inventoryOverview'], queryFn: inventoryApi.getOverview });
+  const { data: overview } = useQuery({ queryKey: ['inventoryOverview', storeFilter], queryFn: () => inventoryApi.getOverview(storeFilter) });
   const { data: replenish = [] } = useQuery({ queryKey: ['replenishSuggestions'], queryFn: inventoryApi.getReplenishSuggestions });
   const { data: transfers = [] } = useQuery({ queryKey: ['transferRecs'], queryFn: inventoryApi.getTransferRecommendations });
   const { data: safetyConfigs = [] } = useQuery({ queryKey: ['safetyConfigs'], queryFn: inventoryApi.getSafetyStockConfigs });
-
-  if (stores.length === 0) return <StoreConnectionEmptyState description={t('inventory.emptyNoStore')} />;
+  const { data: products = [] } = useQuery({ queryKey: ['products'], queryFn: productsApi.list });
 
   const storeById = new Map(stores.map((s) => [s.id, s]));
+  const productById = new Map(products.map((p) => [p.id, p]));
+  // 补货建议与调拨建议都带 storeId：店铺作用域下只看本店，避免出现其他店铺的库存数字。
+  const scopedReplenish = storeFilter ? replenish.filter((r) => r.storeId === storeFilter) : replenish;
+  const scopedTransfers = storeFilter ? transfers.filter((tr) => tr.fromStoreId === storeFilter || tr.toStoreId === storeFilter) : transfers;
+  const scopedSafetyConfigs = storeFilter ? safetyConfigs.filter((sc) => sc.storeId === storeFilter) : safetyConfigs;
   const critical = overview?.critical ?? 0;
   const low = overview?.low ?? 0;
+
+  const replenishMutation = useMutation({
+    mutationFn: (params: { storeId: AllMallId; skuCode: string }) => inventoryApi.createReplenishOrder(params.storeId, params.skuCode),
+    onSuccess: (_, params) => {
+      const suggestion = replenish.find((entry) => entry.storeId === params.storeId && entry.skuCode === params.skuCode);
+      message.success(t('inventory.orderCreatedDetail', {
+        sku: suggestion?.productName ?? params.skuCode,
+        qty: suggestion?.suggestedQuantity ?? 0,
+        supplier: suggestion?.supplier ?? '-',
+        days: suggestion?.leadTimeDays ?? 0,
+      }));
+      queryClient.invalidateQueries({ queryKey: ['replenishSuggestions'] });
+    },
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: (rec: TransferRecommendation) => inventoryApi.applyTransfer(rec),
+    onSuccess: (result, rec) => {
+      if (!result.ok) {
+        message.error(t('inventory.transferFailed'));
+        return;
+      }
+      message.success(t('inventory.transferDone', {
+        qty: result.quantity,
+        from: storeById.get(rec.fromStoreId)?.name ?? '-',
+        to: storeById.get(rec.toStoreId)?.name ?? '-',
+      }));
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['inventoryOverview'] });
+      queryClient.invalidateQueries({ queryKey: ['replenishSuggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['transferRecs'] });
+    },
+  });
 
   const itemColumns: ColumnsType<InventoryItem> = [
     { title: t('inventory.sku'), dataIndex: 'skuName', width: 150, ellipsis: true },
@@ -84,6 +131,9 @@ export function InventoryManagementPage() {
     },
   ];
 
+  // 所有 hook 必须先执行完再分支返回，否则直接打开 /inventory 时店铺数据异步到达会触发 hook 顺序错误。
+  if (stores.length === 0) return <StoreConnectionEmptyState description={t('inventory.emptyNoStore')} />;
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <PageHeader title={t('nav.inventory')} description={t('inventory.subtitle')} />
@@ -108,47 +158,62 @@ export function InventoryManagementPage() {
         />
       )}
 
-      {/* Filters */}
-      <div style={{ padding: '0 24px 12px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <Select value={storeFilter} onChange={setStoreFilter} allowClear placeholder={t('cs.filterByStore')} style={{ width: 140 }} options={stores.map((s) => ({ value: s.id, label: s.name }))} />
-        <Select value={alertFilter} onChange={setAlertFilter} allowClear placeholder={t('inventory.filterAlert')} style={{ width: 120 }} options={['critical', 'low', 'healthy'].map((v) => ({ value: v, label: t(ALERT_TAG[v]?.labelKey ?? v) }))} />
-      </div>
-
       {/* Content */}
       <Tabs defaultActiveKey="list" style={{ flex: 1, padding: '0 24px', overflow: 'auto' }} tabBarStyle={{ marginBottom: 12 }}
         items={[
           {
             key: 'list', label: <><DashboardOutlined />{t('inventory.stockTab')}</>,
             children: (
-              <Table<InventoryItem> rowKey="id" columns={itemColumns} dataSource={items} pagination={{ pageSize: 15 }} size="middle" scroll={{ x: 1000 }} locale={{ emptyText: <Empty description={t('inventory.noItems')} /> }} />
+              <>
+                {/* The alert filter belongs to the stock tab only — replenish / transfer / safety tabs are not filtered. */}
+                <div style={{ marginBottom: 12 }}>
+                  <Select value={alertFilter} onChange={setAlertFilter} allowClear placeholder={t('inventory.filterAlert')} style={{ width: 120 }} options={['alert', 'critical', 'low', 'healthy'].map((v) => ({ value: v, label: v === 'alert' ? t('inventory.alert') : t(ALERT_TAG[v]?.labelKey ?? v) }))} />
+                </div>
+                <Table<InventoryItem> rowKey="id" columns={itemColumns} dataSource={items} pagination={{ pageSize: 15 }} size="middle" scroll={{ x: 1000 }} locale={{ emptyText: <Empty description={t('inventory.noItems')}>{alertFilter ? <Button type="link" onClick={() => setAlertFilter(undefined)}>{t('inventory.clearFilter')}</Button> : null}</Empty> }} />
+              </>
             ),
           },
           {
-            key: 'replenish', label: <><SyncOutlined />{t('inventory.replenishTab')} {replenish.length > 0 && <Tag color="red">{replenish.filter((r) => r.priority === 'urgent').length}</Tag>}</>,
+            key: 'replenish', label: <><SyncOutlined />{t('inventory.replenishTab')} {scopedReplenish.filter((r) => r.priority === 'urgent' && !r.ordered).length > 0 && <Tag color="red">{scopedReplenish.filter((r) => r.priority === 'urgent' && !r.ordered).length}</Tag>}</>,
             children: (
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                {replenish.map((s, i) => (
-                  <Card key={i} size="small" title={<><Tag color={s.priority === 'urgent' ? 'red' : 'blue'}>{t(`inventory.priority_${s.priority}`)}</Tag>{s.productName}</>}>
+                {scopedReplenish.map((s, i) => (
+                  <Card key={i} size="small" title={<><Tag color={s.priority === 'urgent' ? 'red' : 'blue'}>{t(`inventory.priority_${s.priority}`)}</Tag>{s.productName}<Typography.Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}> · {storeById.get(s.storeId)?.name ?? '-'}</Typography.Text></>}>
                     <Row gutter={[16, 8]}>
                       <Col span={8}><Typography.Text type="secondary">{t('inventory.current')}: <Typography.Text strong>{s.currentStock}</Typography.Text></Typography.Text></Col>
                       <Col span={8}><Typography.Text type="secondary">{t('inventory.dailySales')}: <Typography.Text strong>{s.dailySales}</Typography.Text></Typography.Text></Col>
                       <Col span={8}><Typography.Text type="secondary">{t('inventory.supplier')}: {s.supplier}（{s.leadTimeDays}{t('inventory.days')}）</Typography.Text></Col>
                       <Col span={8}><Typography.Text type="secondary">{t('inventory.suggestedQuantity')}: <Typography.Text strong style={{ color: 'var(--ark-purple)' }}>{s.suggestedQuantity}</Typography.Text></Typography.Text></Col>
                       <Col span={8}><Typography.Text type="secondary">{t('inventory.suggestedDate')}: {dayjs(s.suggestedDate).format('YYYY-MM-DD')}</Typography.Text></Col>
-                      <Col span={8}><Button size="small" type="primary" onClick={() => message.info(t('inventory.createOrderMock'))}>{t('inventory.createOrder')}</Button></Col>
+                      <Col span={8}>
+                        {canUpdateInventory && (
+                          s.ordered ? (
+                            <Tag color="green">{t('inventory.orderPlaced')}</Tag>
+                          ) : (
+                            <Button
+                              size="small"
+                              type="primary"
+                              loading={replenishMutation.isPending && replenishMutation.variables?.storeId === s.storeId && replenishMutation.variables?.skuCode === s.skuCode}
+                              onClick={() => replenishMutation.mutate({ storeId: s.storeId, skuCode: s.skuCode })}
+                            >
+                              {t('inventory.createOrder')}
+                            </Button>
+                          )
+                        )}
+                      </Col>
                     </Row>
                     <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 6, marginBottom: 0 }}>{s.reason}</Typography.Paragraph>
                   </Card>
                 ))}
-                {replenish.length === 0 && <Empty description={t('inventory.noReplenish')} />}
+                {scopedReplenish.length === 0 && <Empty description={t('inventory.noReplenish')} />}
               </Space>
             ),
           },
           {
-            key: 'transfer', label: <><RocketOutlined />{t('inventory.transferTab')} {transfers.length > 0 && <Tag color="orange">{transfers.length}</Tag>}</>,
+            key: 'transfer', label: <><RocketOutlined />{t('inventory.transferTab')} {scopedTransfers.length > 0 && <Tag color="orange">{scopedTransfers.length}</Tag>}</>,
             children: (
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                {transfers.map((tr, i) => (
+                {scopedTransfers.map((tr, i) => (
                   <Card key={i} size="small">
                     <Row gutter={[16, 8]}>
                       <Col span={24}>
@@ -160,12 +225,23 @@ export function InventoryManagementPage() {
                       </Col>
                       <Col span={8}><Typography.Text type="secondary">{t('inventory.fromStore')}: <Typography.Text strong>{storeById.get(tr.fromStoreId)?.name ?? '-'}</Typography.Text>（{tr.fromStock}{t('inventory.units')}）</Typography.Text></Col>
                       <Col span={8}><Typography.Text type="secondary">{t('inventory.toStore')}: <Typography.Text strong>{storeById.get(tr.toStoreId)?.name ?? '-'}</Typography.Text>（{tr.toStock}{t('inventory.units')}）</Typography.Text></Col>
-                      <Col span={8}><Button size="small" type="primary" onClick={() => message.info(t('inventory.transferMock', { qty: tr.quantity, from: storeById.get(tr.fromStoreId)?.name ?? '-', to: storeById.get(tr.toStoreId)?.name ?? '-' }))}>{t('inventory.transferBtn', { qty: tr.quantity })}</Button></Col>
+                      <Col span={8}>
+                        {canUpdateInventory && (
+                          <Button
+                            size="small"
+                            type="primary"
+                            loading={transferMutation.isPending && transferMutation.variables?.skuCode === tr.skuCode && transferMutation.variables?.fromStoreId === tr.fromStoreId}
+                            onClick={() => transferMutation.mutate(tr)}
+                          >
+                            {t('inventory.transferBtn', { qty: tr.quantity })}
+                          </Button>
+                        )}
+                      </Col>
                     </Row>
                     <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 6, marginBottom: 0 }}>{tr.reason}</Typography.Paragraph>
                   </Card>
                 ))}
-                {transfers.length === 0 && <Empty description={t('inventory.noTransfers')} />}
+                {scopedTransfers.length === 0 && <Empty description={t('inventory.noTransfers')} />}
               </Space>
             ),
           },
@@ -173,8 +249,8 @@ export function InventoryManagementPage() {
             key: 'safety', label: <><ShopOutlined />{t('inventory.safetyStockTab')}</>,
             children: (
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                {safetyConfigs.map((sc, i) => (
-                  <Card key={i} size="small" title={`${sc.productId} — ${storeById.get(sc.storeId)?.name ?? '-'}`}>
+                {scopedSafetyConfigs.map((sc, i) => (
+                  <Card key={i} size="small" title={`${productById.get(sc.productId)?.name ?? sc.productId} — ${storeById.get(sc.storeId)?.name ?? '-'}`}>
                     <Row gutter={16}>
                       <Col span={12}><Statistic title={t('inventory.currentSafety')} value={sc.currentSafetyStock} suffix={t('inventory.units')} /></Col>
                       <Col span={12}><Statistic title={t('inventory.suggestedSafety')} value={sc.suggestedSafetyStock} suffix={t('inventory.units')} valueStyle={{ color: 'var(--ark-purple)' }} /></Col>
@@ -182,7 +258,7 @@ export function InventoryManagementPage() {
                     <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 6, marginBottom: 0 }}>{sc.recommendation}</Typography.Paragraph>
                   </Card>
                 ))}
-                {safetyConfigs.length === 0 && <Empty description={t('inventory.noSafety')} />}
+                {scopedSafetyConfigs.length === 0 && <Empty description={t('inventory.noSafety')} />}
               </Space>
             ),
           },

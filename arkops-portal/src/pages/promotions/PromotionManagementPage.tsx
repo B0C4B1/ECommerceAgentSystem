@@ -8,16 +8,19 @@ import {
   CalendarOutlined, FireOutlined, PlusOutlined, RobotOutlined,
   ScheduleOutlined, ThunderboltOutlined, UnorderedListOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Card, Col, Row, Segmented, Select, Space, Spin, Switch, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Row, Segmented, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import { promotionsApi } from '../../api/promotions';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { useStoreScope } from '../../app/storeScope';
+import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import { CalendarView } from './CalendarView';
 import { CreatePromotionDrawer } from './CreatePromotionDrawer';
+import type { PromotionDefaults } from './CreatePromotionDrawer';
 import { PromotionList } from './PromotionList';
-import type { AllMallId } from '../../types/domain';
+import type { PromotionType } from '../../types/domain';
 
 function formatCurrency(n: number): string {
   if (n >= 10000) return `¥${(n / 10000).toFixed(1)}万`;
@@ -27,14 +30,20 @@ function formatCurrency(n: number): string {
 export function PromotionManagementPage() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const [storeFilter, setStoreFilter] = useState<AllMallId | undefined>();
+  const { scope } = useStoreScope();
+  const { can } = usePermission();
+  const canCreatePromotion = can('promotions', 'create');
+  const canUpdatePromotion = can('promotions', 'update');
+  // Store filtering is shell-level (D3); the page no longer owns a store select.
+  const storeFilter = scope === 'all' ? undefined : scope;
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [typeFilter, setTypeFilter] = useState<string | undefined>();
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('list');
   const [createOpen, setCreateOpen] = useState(false);
+  const [createDefaults, setCreateDefaults] = useState<PromotionDefaults | null>(null);
   // Agent automation
-  const [agentEnabled, setAgentEnabled] = useState(true);
+  const [agentEnabled, setAgentEnabled] = useState(() => promotionsApi.getAutomationEnabled());
   const [agentSuggesting, setAgentSuggesting] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<{ name: string; type: string; reason: string; discount: number }[]>([]);
 
@@ -43,35 +52,52 @@ export function PromotionManagementPage() {
     queryKey: ['promotions', storeFilter, statusFilter, typeFilter, search],
     queryFn: () => promotionsApi.list({ storeId: storeFilter, status: statusFilter, type: typeFilter, search }),
   });
-  const { data: stats } = useQuery({ queryKey: ['promotionStats'], queryFn: promotionsApi.getStats });
+  const { data: stats } = useQuery({ queryKey: ['promotionStats', storeFilter], queryFn: () => promotionsApi.getStats(storeFilter) });
   const { data: products = [] } = useQuery({ queryKey: ['products'], queryFn: () => import('../../api/products').then((m) => m.productsApi.list()) });
 
   const createMutation = useMutation({
     mutationFn: promotionsApi.create,
     onSuccess: () => {
       setCreateOpen(false);
+      message.success(t('promotions.created'));
       queryClient.invalidateQueries({ queryKey: ['promotions'] });
       queryClient.invalidateQueries({ queryKey: ['promotionStats'] });
     },
   });
 
-  // Agent: analyze and suggest promotions
+  // Agent: analyze and suggest promotions — 建议基于真实商品，不虚构库存天数与竞品价格。
   const handleAgentSuggest = async () => {
+    if (products.length === 0) {
+      message.info(t('promotions.noProductsForSuggestion'));
+      return;
+    }
     setAgentSuggesting(true);
     await new Promise((r) => setTimeout(r, 1200));
-    setAiSuggestions([
-      { name: '滞销清仓 — 积木桌限时闪购', type: 'flash_sale', reason: '库存闲置超 60 天，AI 建议 6 折闪购，预计 ROI 5.2x', discount: 40 },
-      { name: '开学季 — 运动鞋满减活动', type: 'full_reduction', reason: '季节性智能推荐，9月开学季销售高峰，预计 ROI 6.8x', discount: 20 },
-      { name: '竞品跟价 — 露营灯优惠券', type: 'coupon', reason: '竞品降价 15%，AI 建议跟价优惠券，预计 ROI 4.5x', discount: 25 },
-    ]);
+    const picks = products.slice(0, 3);
+    const drafts = [
+      { name: t('promotions.suggestionFlashName', { name: picks[0].name }), type: 'flash_sale' as const, reason: t('promotions.suggestionFlashReason'), discount: 40 },
+      { name: t('promotions.suggestionBundleName', { name: picks[1]?.name ?? picks[0].name }), type: 'full_reduction' as const, reason: t('promotions.suggestionBundleReason'), discount: 20 },
+      { name: t('promotions.suggestionCouponName', { name: picks[2]?.name ?? picks[0].name }), type: 'coupon' as const, reason: t('promotions.suggestionCouponReason'), discount: 25 },
+    ];
+    setAiSuggestions(drafts);
     setAgentSuggesting(false);
     message.success(t('promotions.agentSuggested'));
   };
 
-  const handleApplySuggestion = (suggestion: typeof aiSuggestions[0]) => {
+  const openCreateDrawer = () => {
+    setCreateDefaults(null);
     setCreateOpen(true);
-    // Pre-fill is handled by CreatePromotionDrawer picking up defaults
+  };
+
+  const handleApplySuggestion = (suggestion: typeof aiSuggestions[0]) => {
+    setCreateDefaults({ name: suggestion.name, type: suggestion.type as PromotionType, discount: suggestion.discount });
+    setCreateOpen(true);
     message.info(t('promotions.agentApplyHint', { name: suggestion.name }));
+  };
+
+  const closeCreateDrawer = () => {
+    setCreateOpen(false);
+    setCreateDefaults(null);
   };
 
   if (stores.length === 0) {
@@ -84,11 +110,13 @@ export function PromotionManagementPage() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <PageHeader
         title={t('nav.promotions')}
-        description={t('promotions.subtitle', { total: stats ? stats.active + stats.scheduled + stats.ended : 0 })}
+        description={t('promotions.subtitle', { total: campaigns.length })}
         actions={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            {t('promotions.create')}
-          </Button>
+          canCreatePromotion ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDrawer}>
+              {t('promotions.create')}
+            </Button>
+          ) : undefined
         }
       />
 
@@ -107,7 +135,12 @@ export function PromotionManagementPage() {
           <Space>
             <Switch
               checked={agentEnabled}
-              onChange={setAgentEnabled}
+              onChange={(checked) => {
+                setAgentEnabled(checked);
+                promotionsApi.setAutomationEnabled(checked);
+                message.success(t('promotions.agentSwitchSaved', { state: checked ? t('promotions.agentActive') : t('promotions.agentPaused') }));
+              }}
+              disabled={!canUpdatePromotion}
               checkedChildren="ON"
               unCheckedChildren="OFF"
               size="small"
@@ -149,9 +182,11 @@ export function PromotionManagementPage() {
                       {s.reason}
                     </Typography.Paragraph>
                   </div>
-                  <Button size="small" type="link" onClick={() => handleApplySuggestion(s)}>
-                    {t('promotions.agentQuickCreate')} →
-                  </Button>
+                  {canCreatePromotion && (
+                    <Button size="small" type="link" onClick={() => handleApplySuggestion(s)}>
+                      {t('promotions.agentQuickCreate')} →
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}
@@ -192,14 +227,6 @@ export function PromotionManagementPage() {
       {/* Toolbar */}
       <div style={{ padding: '0 24px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Select
-            value={storeFilter}
-            onChange={setStoreFilter}
-            allowClear
-            placeholder={t('cs.filterByStore')}
-            style={{ width: 140 }}
-            options={stores.map((s) => ({ value: s.id, label: s.name }))}
-          />
           <Select
             value={statusFilter}
             onChange={setStatusFilter}
@@ -250,11 +277,12 @@ export function PromotionManagementPage() {
       {/* Create drawer */}
       <CreatePromotionDrawer
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreateDrawer}
         onCreate={createMutation.mutate}
         loading={createMutation.isPending}
         stores={stores}
         products={products}
+        defaults={createDefaults}
       />
     </div>
   );

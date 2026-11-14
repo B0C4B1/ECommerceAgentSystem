@@ -99,6 +99,8 @@ export interface Approval {
   decisionNote?: string;
   decidedBy?: string;
   priorApprovals?: PriorApprovalRecord[];
+  /** 创建时由店铺策略解析出的审批要求；历史数据缺失时按当前策略实时解析 */
+  requirement?: ApprovalRequirement;
 }
 
 export type AuditCategory = 'approval' | 'agent_action' | 'human_ops' | 'system_event' | 'store_session' | 'task' | 'agent' | 'exception' | 'store';
@@ -113,6 +115,8 @@ export interface AuditLog {
   at: string;
   category: AuditCategory;
   linkTo?: string;
+  /** 可归因到店铺的操作带上店铺 id，审计页才能按店筛选；系统级事件为空。 */
+  storeId?: AllMallId;
 }
 
 export interface Member {
@@ -121,6 +125,8 @@ export interface Member {
   email: string;
   role: 'Owner' | 'Admin' | 'Operator' | 'Approver' | 'Finance' | 'Viewer';
   status: 'active' | 'invited';
+  /** P30.5：该成员负责的店铺；为空表示不参与店铺维度路由，只按角色兜底。 */
+  storeIds?: AllMallId[];
 }
 
 // ===== Agent Management =====
@@ -419,8 +425,6 @@ export interface ScenarioState {
   key: ScenarioKey;
   enabled: boolean;
   autonomy: AutonomyLevel;
-  /** 连续获批准的执行次数 — 用于"信任累积"建议 */
-  approvedRunsStreak: number;
   /** 用户已忽略当前放宽建议 */
   trustSuggestionDismissed: boolean;
   /** storeId → 参数覆盖 */
@@ -456,6 +460,273 @@ export interface AgentOutcomeRecord {
   assessment: 'positive' | 'neutral' | 'negative' | 'pending';
   assessmentNote: string;
 }
+
+// ===== Operating model: merchant profile / store goal / policy =====
+
+/** 商家类型：通用型（中小商家开箱即用）/ 垂类型（按行业定制） */
+export type MerchantType = 'general' | 'vertical';
+
+export type GoalMetric = 'gmv' | 'gross_profit' | 'inventory_turnover' | 'cs_sla';
+export type GoalHorizon = 'month' | 'quarter';
+export type GoalPriority = 'growth' | 'profit' | 'clearance';
+
+/** 商家画像 — 决定默认 Goal/Policy 模板（L1 商家模板层） */
+export interface MerchantProfile {
+  type: MerchantType;
+  industry: string;
+  scale: 'small' | 'medium' | 'large';
+}
+
+/**
+ * P33.2 目标周期结算：上一个自然月的目标与实际结果。
+ * 目标跨月不再静默沿用，Agent 结算上期后把结论留在目标上，供人回看。
+ */
+export interface GoalPeriodSettlement {
+  /** 被结算的月份（YYYY-MM）。 */
+  periodKey: string;
+  target: number;
+  /** 该月实际 GMV；无可用经营基线时为 null，不编数字。 */
+  actualGmv: number | null;
+  /** 达成率，1 = 100%；无法结算时为 null。 */
+  achievedPct: number | null;
+  verdict: 'achieved' | 'missed' | 'unknown';
+  settledAt: string;
+}
+
+/** 店铺经营目标 — 挂在店铺上，而不是挂在单个任务上 */
+export interface StoreGoal {
+  storeId: AllMallId;
+  metric: GoalMetric;
+  target: number;
+  current: number;
+  horizon: GoalHorizon;
+  periodLabel: string;
+  /** 目标归属月份（YYYY-MM）：目标属于哪个月是事实，不靠默认值猜。 */
+  periodKey: string;
+  priority: GoalPriority;
+  constraints: {
+    minGrossMargin: number;
+    maxDiscountPct: number;
+    monthlyBudgetCap: number;
+  };
+  /** 最近一次跨月结转的结算结果；从未跨月为 undefined。 */
+  lastSettlement?: GoalPeriodSettlement;
+  updatedAt: string;
+}
+
+/**
+ * P29.3 账户级目标 — 人只下一个账户月度 GMV 目标，分配到店由 Agent 计算。
+ * 单店目标仍是执行口径（StoreGoal），账户目标只解决「人不想逐店算目标」。
+ */
+export interface AccountGoal {
+  metric: 'gmv';
+  target: number;
+  periodLabel: string;
+  updatedAt: string;
+}
+
+/**
+ * 店铺级运营策略 — 只描述「人授权到什么程度」（自主等级 + 预算池）。
+ * P28：护栏不再在策略里单独存储，唯一可编辑源是 StoreGoal.constraints，
+ * 生效护栏由 operatingModel 派生，避免同一护栏两处存储、两处展示。
+ */
+export interface OperatingPolicy {
+  storeId: AllMallId;
+  autonomy: AutonomyLevel;
+  budgetPool: { adMonthly: number; promoMonthly: number };
+  updatedAt: string;
+}
+
+/** 派生护栏 — 从 StoreGoal.constraints 生成，只读；含两项不可编辑的系统底线。 */
+export interface StoreGuards {
+  minGrossMargin: number;
+  maxDiscountPct: number;
+  monthlyBudgetCap: number;
+  maxPriceChangePct: number;
+  autoRefundCap: number;
+}
+
+/** 审批要求：自动执行 / 单人审批 / 双人审批 */
+export type ApprovalRequirement = 'auto' | 'single' | 'dual';
+
+/** 生效策略的来源：店铺级覆盖 / 场景默认 / 系统兜底 */
+export type PolicySource = 'store' | 'scenario' | 'system';
+
+export interface EffectivePolicy {
+  storeId: AllMallId;
+  autonomy: AutonomyLevel;
+  source: PolicySource;
+  budgetPool: OperatingPolicy['budgetPool'];
+  guards: StoreGuards;
+}
+
+// ===== Orchestrator: operating cycle / proposals / conflict arbitration =====
+
+/** 经营周期阶段：感知 → 诊断 → 提案 → 仲裁 → 执行 */
+export type CycleStage = 'observe' | 'diagnose' | 'propose' | 'arbitrate' | 'execute';
+
+export type ProposalAction =
+  | 'raise_price'
+  | 'cut_price'
+  | 'increase_ad_budget'
+  | 'increase_discount'
+  | 'clear_stock'
+  | 'replenish_stock'
+  /** 首启引导里的口碑修复动作，用于把审批效果挂到店铺目标上 */
+  | 'reply_reviews';
+
+/** 提案在仲裁后的去向：待提交 / 已选入 / 被拦截 / 延后 / 已提交 */
+export type ProposalStatus = 'pending' | 'selected' | 'blocked' | 'deferred' | 'submitted';
+
+export type ConflictType = 'direction' | 'budget' | 'margin' | 'discount_cap' | 'dependency' | 'double_count';
+
+/** 单个 Agent 在一个商品/店铺目标上的行动提案 */
+export interface CycleProposal {
+  id: AllMallId;
+  cycleId: AllMallId;
+  agentType: AgentType;
+  scenarioKey: ScenarioKey;
+  action: ProposalAction;
+  targetLabel: string;
+  before: string;
+  after: string;
+  /** 预期对目标指标的贡献；指标含义由 Goal.metric 解释 */
+  expectedImpact: number;
+  /** 直接成本（预算/让利），用于预算护栏判定 */
+  cost: number;
+  riskLevel: RiskLevel;
+  /** 折扣类提案的执行后毛利率，用于毛利护栏判定 */
+  projectedGrossMargin?: number;
+  /** 折扣力度（%），用于折扣上限护栏判定 */
+  discountPct?: number;
+  status: ProposalStatus;
+}
+
+/** P8 人工裁决结论：维持自动仲裁 / 改判 */
+export type ArbitrationDecision = 'uphold' | 'override';
+
+/** P8 裁决理由 — 记录“为什么这样裁”，供复盘和规则沉淀 */
+export type ArbitrationReason =
+  | 'goal_priority'
+  | 'protect_margin'
+  | 'protect_stock'
+  | 'platform_recommendation'
+  | 'manual';
+
+/** 冲突仲裁结论 — 只记录“谁胜出”和“依据”，文案在 UI 侧按 i18n 组装 */
+export interface ConflictResolution {
+  id: AllMallId;
+  type: ConflictType;
+  targetLabel: string;
+  winnerProposalId?: AllMallId;
+  loserProposalIds: AllMallId[];
+  basis: 'goal_priority' | 'guardrail';
+  detail: {
+    priority?: GoalPriority;
+    remainingBudget?: number;
+    requiredBudget?: number;
+    projectedMargin?: number;
+    minMargin?: number;
+    /** 折扣上限护栏：本提案折扣力度与目标允许的上限 */
+    discountPct?: number;
+    maxDiscountPct?: number;
+    /** 依赖门控：店铺当前低于安全库存的 SKU 数 */
+    shortageCount?: number;
+    /** 重复计益：被延后的重复动作预期贡献 */
+    duplicateImpact?: number;
+    /** P8 已沉淀的方向偏好：本轮仲裁直接按此方向，不再重复问人 */
+    preferredDirection?: 'raise' | 'discount';
+  };
+  /** P8 人工裁决：保留自动结论或改判 */
+  decision?: ArbitrationDecision;
+  decisionReason?: ArbitrationReason;
+  decidedAt?: string;
+  /** P9 可追溯：谁做的决定、补充说明 */
+  decidedBy?: string;
+  decisionNote?: string;
+  /** P9 改判后被放行、可直接提交的动作 */
+  releasedProposalIds?: AllMallId[];
+}
+
+/** P5 多 Agent 协同：互补动作按顺序执行，避免“各自最优、合起来互相抵消”。 */
+export type CollaborationKind = 'restock_price_ads' | 'restock_ads' | 'price_ads';
+
+/** 协同组状态：可执行 / 部分受阻 / 未成立 / 已协同执行 */
+export type CollaborationStatus = 'ready' | 'partial' | 'blocked' | 'done';
+
+export interface AgentCollaboration {
+  id: AllMallId;
+  kind: CollaborationKind;
+  /** 主 Agent：先执行、对协同结果负责 */
+  leadAgent: AgentType;
+  /** 参与协同的全部 Agent（含主 Agent） */
+  memberAgents: AgentType[];
+  proposalIds: AllMallId[];
+  /** 建议执行顺序 — 先补货再加投，避免卖断货 */
+  sequence: AllMallId[];
+  /** 协同预期贡献：按可执行成员合计，完全成立时叠加协同系数 */
+  combinedImpact: number;
+  /** 协同系数，UI 明示 */
+  factor: number;
+  status: CollaborationStatus;
+  /** 当前可执行（selected）成员数 */
+  executableCount: number;
+  memberCount: number;
+}
+
+/** 归因回写状态：待审批后回写 / 已回写 / 已取消（不回写） */
+export type OutcomeStatus = 'projected' | 'realized' | 'lost';
+
+/** 提案执行后的效果记录 — 把动作与目标进度连起来，供下一轮诊断读取 */
+export interface GoalOutcome {
+  id: AllMallId;
+  storeId: AllMallId;
+  cycleId: AllMallId;
+  proposalId: AllMallId;
+  /** 审批路径下关联的审批单；自动执行时为空 */
+  approvalId?: AllMallId;
+  agentType: AgentType;
+  action: ProposalAction;
+  targetLabel: string;
+  /** 效果计入的目标指标，按提案所属周期的诊断指标解释 */
+  metric: GoalMetric;
+  expectedImpact: number;
+  /** 实测效果；projected / lost 状态为空 */
+  actualImpact?: number;
+  status: OutcomeStatus;
+  /** P6 执行结果：自动执行成功后仍可能失败/超时，用于升级给人 */
+  executionStatus?: 'succeeded' | 'failed' | 'timeout';
+  recordedAt: string;
+}
+
+export interface OperatingCycle {
+  id: AllMallId;
+  storeId: AllMallId;
+  periodLabel: string;
+  stage: CycleStage;
+  generatedAt?: string;
+  /** 本轮诊断：目标差距 */
+  diagnosis: { metric: GoalMetric; target: number; current: number; gapPct: number; priority: GoalPriority };
+  proposals: CycleProposal[];
+  conflicts: ConflictResolution[];
+  /** P5 多 Agent 协同组 */
+  collaborations: AgentCollaboration[];
+  /** 该店铺累计的归因回写记录（P3） */
+  outcomes: GoalOutcome[];
+  /** P6 本轮由谁触发：人工 / 定时 / 事件 */
+  triggeredBy?: CycleTrigger;
+  /** P6 触发原因，仅自动触发时有值 */
+  triggerReason?: 'cadence' | 'stock_alert';
+  /** P10 本轮仲裁实际采用的护栏，供目标/护栏被改后提示重新生成 */
+  guardSnapshot?: {
+    minGrossMargin: number;
+    maxDiscountPct: number;
+    monthlyBudgetCap: number;
+  };
+}
+
+/** P6 经营周期触发来源 */
+export type CycleTrigger = 'manual' | 'schedule' | 'event';
 
 // ===== Store Business Detail =====
 
@@ -956,6 +1227,7 @@ export interface InventoryItem {
 }
 
 export interface ReplenishSuggestion {
+  storeId: AllMallId;
   productName: string;
   skuCode: string;
   currentStock: number;
@@ -967,6 +1239,8 @@ export interface ReplenishSuggestion {
   leadTimeDays: number;
   priority: 'urgent' | 'normal' | 'planned';
   reason: string;
+  /** 本次会话内已下补货单，卡片保留但不再重复下单。 */
+  ordered?: boolean;
 }
 
 export interface TransferRecommendation {

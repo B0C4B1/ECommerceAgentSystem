@@ -8,7 +8,7 @@
  */
 
 import { CameraOutlined, CheckCircleOutlined, PlusOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
-import { Button, Card, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, Space, Table, Tag, Typography } from 'antd';
 import { useI18n } from '../../app/i18n';
 import { StatusBadge } from '../../components/StatusBadge';
 import { ProductDraftPreview } from './ProductDraftPreview';
@@ -131,32 +131,37 @@ export function ProductLaunchDraftCard({
             },
             {
               title: t('common.actions'), width: 180,
-              render: (_: unknown, record: Task) => (
+              render: (_: unknown, record: Task) => {
+                const draft = productDrafts[record.id];
+                if (!draft && (record.status === 'draft' || record.status === 'queued' || record.status === 'waiting_approval')) {
+                  return <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('agent.draftPending')}</Typography.Text>;
+                }
+                return (
                 <Space size="small">
-                  {(record.status === 'draft' || record.status === 'queued') && (
+                  {draft && (record.status === 'draft' || record.status === 'queued' || record.status === 'waiting_approval') && (
                     <>
                       <Button
                         size="small" type="primary" icon={<CheckCircleOutlined />}
-                        onClick={() => {
-                          message.success(t('agent.draftApproved'));
-                          onApprove(record.id);
-                        }}
+                        onClick={() => onApprove(record.id)}
                       >
                         {t('agent.approvePublish')}
                       </Button>
-                      <Button
-                        size="small" icon={<ReloadOutlined />}
-                        onClick={() => onRegenerate(record.id)}
-                      >
-                        {t('agent.regenerate')}
-                      </Button>
+                      {(record.status === 'draft' || record.status === 'queued') && (
+                        <Button
+                          size="small" icon={<ReloadOutlined />}
+                          onClick={() => onRegenerate(record.id)}
+                        >
+                          {t('agent.regenerate')}
+                        </Button>
+                      )}
                     </>
                   )}
                   <Button size="small" danger icon={<StopOutlined />} onClick={() => onCancel(record.id)}>
                     {t('common.cancel')}
                   </Button>
                 </Space>
-              ),
+                );
+              },
             },
           ]}
         />

@@ -1,10 +1,11 @@
 import { UserAddOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Card, Form, Input, message, Modal, Select, Space, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMemo, useState } from 'react';
 import { settingsApi } from '../../api/settings';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
 import type { Member } from '../../types/domain';
 
@@ -12,9 +13,26 @@ const ALL_ROLES = ['Owner', 'Admin', 'Operator', 'Approver', 'Finance', 'Viewer'
 
 export function MembersSettingsPage() {
   const { t } = useI18n();
+  const { can } = usePermission();
+  const canInviteMember = can('members', 'create');
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteForm] = Form.useForm();
+  const queryClient = useQueryClient();
   const { data = [] } = useQuery({ queryKey: ['members'], queryFn: settingsApi.members });
+
+  const inviteMutation = useMutation({
+    mutationFn: (params: { email: string; role: Member['role'] }) => settingsApi.inviteMember(params),
+    onSuccess: (result) => {
+      if (result.existed) {
+        message.info(t('settings.inviteExists'));
+        return;
+      }
+      message.success(t('settings.inviteSuccess'));
+      setInviteModalOpen(false);
+      inviteForm.resetFields();
+      queryClient.invalidateQueries({ queryKey: ['members'] });
+    },
+  });
 
   const roleOptions = useMemo(() => [
     { value: 'Admin', label: t('member.role.Admin') },
@@ -35,7 +53,7 @@ export function MembersSettingsPage() {
       <PageHeader
         title={t('settings.membersTitle')}
         description={t('settings.membersDescription')}
-        actions={<Button icon={<UserAddOutlined />} onClick={() => setInviteModalOpen(true)}>{t('settings.invite')}</Button>}
+        actions={canInviteMember ? <Button icon={<UserAddOutlined />} onClick={() => setInviteModalOpen(true)}>{t('settings.invite')}</Button> : undefined}
       />
       <Card>
         <Table rowKey="id" columns={columns} dataSource={data} pagination={false} />
@@ -55,12 +73,11 @@ export function MembersSettingsPage() {
         open={inviteModalOpen}
         onCancel={() => { setInviteModalOpen(false); inviteForm.resetFields(); }}
         onOk={() => {
-          inviteForm.validateFields().then(() => {
-            message.success(t('settings.inviteSuccess'));
-            setInviteModalOpen(false);
-            inviteForm.resetFields();
+          inviteForm.validateFields().then((values) => {
+            inviteMutation.mutate({ email: values.email, role: values.role });
           });
         }}
+        confirmLoading={inviteMutation.isPending}
       >
         <Form form={inviteForm} layout="vertical">
           <Form.Item label={t('login.email')} name="email" rules={[{ required: true, type: 'email', message: t('settings.emailValidation') }]}>

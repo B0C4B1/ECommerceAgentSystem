@@ -147,6 +147,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const setRole = useCallback((next: Role) => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, next);
     setLegacyRoleState(next);
+    // Keep the signed-in session in sync, otherwise `role` (derived from the session
+    // user) would silently ignore the demo role switch and permissions never change.
+    setSessionUser((current) => {
+      if (!current || current.role === next) return current;
+      const updated = { ...current, role: next };
+      storeTokens(createMockToken(updated, 3600_000));
+      try {
+        sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
   }, []);
 
   const updateExperience = useCallback((experience: SessionUser['experience']) => {

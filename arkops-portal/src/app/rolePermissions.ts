@@ -23,7 +23,14 @@ export type PermissionResource =
   | 'notifications'
   | 'exceptions'
   | 'approvals'
-  | 'setup';
+  | 'setup'
+  | 'customer_service'
+  | 'reviews'
+  | 'promotions'
+  | 'ads'
+  | 'inventory'
+  | 'livestream'
+  | 'reports';
 
 /**
  * Centralized role permission matrix.
@@ -44,7 +51,7 @@ const ROLE_PERMISSIONS: Record<Role, Record<string, boolean>> = {
     '/inventory': true,
     '/livestream': true,
     '/reports': true,
-    '/stores': true, '/settings/stores': true, '/settings/members': true,
+    '/stores': true, '/settings/members': true,
     '/settings/models': true, '/settings/billing': true,
     '/settings/audit-logs': true, '/settings/notifications': true,
     '/settings/guide': true, '/setup': true,
@@ -60,7 +67,7 @@ const ROLE_PERMISSIONS: Record<Role, Record<string, boolean>> = {
     '/inventory': true,
     '/livestream': true,
     '/reports': true,
-    '/stores': true, '/settings/stores': true, '/settings/members': true,
+    '/stores': true, '/settings/members': true,
     '/settings/models': true, '/settings/billing': true,
     '/settings/audit-logs': true, '/settings/notifications': true,
     '/settings/guide': true, '/setup': true,
@@ -76,7 +83,7 @@ const ROLE_PERMISSIONS: Record<Role, Record<string, boolean>> = {
     '/inventory': true,
     '/livestream': true,
     '/reports': true,
-    '/stores': true, '/settings/stores': true, '/settings/members': false,
+    '/stores': true, '/settings/members': false,
     '/settings/models': true, '/settings/billing': true,
     '/settings/audit-logs': true, '/settings/notifications': true,
     '/settings/guide': true, '/setup': true,
@@ -92,7 +99,7 @@ const ROLE_PERMISSIONS: Record<Role, Record<string, boolean>> = {
     '/inventory': true,
     '/livestream': true,
     '/reports': true,
-    '/stores': true, '/settings/stores': true, '/settings/members': false,
+    '/stores': true, '/settings/members': false,
     '/settings/models': false, '/settings/billing': true,
     '/settings/audit-logs': false, '/settings/notifications': false,
     '/settings/guide': true, '/setup': true, // D10: /setup fronts the /agents expert view; grant together
@@ -103,7 +110,7 @@ const ROLE_PERMISSIONS: Record<Role, Record<string, boolean>> = {
     '/inbox': false, // WS-B: Action Inbox
     '/livestream': false,
     '/reports': false,
-    '/stores': false, '/settings/stores': false, '/settings/members': false,
+    '/stores': false, '/settings/members': false,
     '/settings/models': false, '/settings/billing': true,
     '/settings/audit-logs': false, '/settings/notifications': false,
     '/settings/guide': false, '/setup': false,
@@ -119,7 +126,7 @@ const ROLE_PERMISSIONS: Record<Role, Record<string, boolean>> = {
     '/inventory': true,
     '/livestream': true,
     '/reports': true,
-    '/stores': true, '/settings/stores': true, '/settings/members': false,
+    '/stores': true, '/settings/members': false,
     '/settings/models': true, '/settings/billing': true,
     '/settings/audit-logs': true, '/settings/notifications': false,
     '/settings/guide': true, '/setup': true, // D10: /setup fronts the /agents expert view; grant together
@@ -136,7 +143,7 @@ const ROLE_PERMISSIONS: Record<Role, Record<string, boolean>> = {
 const OPERATION_PERMISSIONS: Record<Role, Record<PermissionResource, PermissionAction[]>> = {
   Owner: {
     orders: ['create', 'read', 'update', 'delete', 'export'],
-    products: ['create', 'read', 'update', 'delete', 'export'],
+    products: ['create', 'read', 'update', 'delete', 'export', 'approve'],
     agents: ['create', 'read', 'update', 'delete'],
     stores: ['create', 'read', 'update', 'delete'],
     members: ['create', 'read', 'update', 'delete'],
@@ -147,10 +154,17 @@ const OPERATION_PERMISSIONS: Record<Role, Record<PermissionResource, PermissionA
     exceptions: ['read', 'update'],
     approvals: ['read', 'approve'],
     setup: ['read', 'update'],
+    customer_service: ['read', 'update'],
+    reviews: ['read', 'update'],
+    promotions: ['create', 'read', 'update'],
+    ads: ['read', 'update'],
+    inventory: ['read', 'update'],
+    livestream: ['read', 'update'],
+    reports: ['read', 'export'],
   },
   Admin: {
     orders: ['create', 'read', 'update', 'delete', 'export'],
-    products: ['create', 'read', 'update', 'delete', 'export'],
+    products: ['create', 'read', 'update', 'delete', 'export', 'approve'],
     agents: ['create', 'read', 'update', 'delete'],
     stores: ['create', 'read', 'update', 'delete'],
     members: ['create', 'read', 'update', 'delete'],
@@ -161,6 +175,13 @@ const OPERATION_PERMISSIONS: Record<Role, Record<PermissionResource, PermissionA
     exceptions: ['read', 'update'],
     approvals: ['read', 'approve'],
     setup: ['read', 'update'],
+    customer_service: ['read', 'update'],
+    reviews: ['read', 'update'],
+    promotions: ['create', 'read', 'update'],
+    ads: ['read', 'update'],
+    inventory: ['read', 'update'],
+    livestream: ['read', 'update'],
+    reports: ['read', 'export'],
   },
   Operator: {
     orders: ['create', 'read', 'update'],
@@ -175,10 +196,17 @@ const OPERATION_PERMISSIONS: Record<Role, Record<PermissionResource, PermissionA
     exceptions: ['read', 'update'],
     approvals: ['read'],
     setup: ['read'],
+    customer_service: ['read', 'update'],
+    reviews: ['read', 'update'],
+    promotions: ['create', 'read', 'update'],
+    ads: ['read', 'update'],
+    inventory: ['read', 'update'],
+    livestream: ['read', 'update'],
+    reports: ['read', 'export'],
   },
   Approver: {
     orders: ['read'],
-    products: ['read'],
+    products: ['read', 'approve'],
     agents: ['read'],
     stores: ['read'],
     members: [],
@@ -189,6 +217,13 @@ const OPERATION_PERMISSIONS: Record<Role, Record<PermissionResource, PermissionA
     exceptions: ['read'],
     approvals: ['read', 'approve'],
     setup: [],
+    customer_service: ['read'],
+    reviews: ['read'],
+    promotions: ['read'],
+    ads: ['read'],
+    inventory: ['read'],
+    livestream: ['read'],
+    reports: ['read'],
   },
   Finance: {
     orders: [],
@@ -203,6 +238,13 @@ const OPERATION_PERMISSIONS: Record<Role, Record<PermissionResource, PermissionA
     exceptions: [],
     approvals: [],
     setup: [],
+    customer_service: [],
+    reviews: [],
+    promotions: [],
+    ads: [],
+    inventory: [],
+    livestream: [],
+    reports: [],
   },
   Viewer: {
     orders: ['read'],
@@ -217,6 +259,13 @@ const OPERATION_PERMISSIONS: Record<Role, Record<PermissionResource, PermissionA
     exceptions: ['read'],
     approvals: ['read'],
     setup: [],
+    customer_service: ['read'],
+    reviews: ['read'],
+    promotions: ['read'],
+    ads: ['read'],
+    inventory: ['read'],
+    livestream: ['read'],
+    reports: ['read'],
   },
 };
 
@@ -228,25 +277,25 @@ const ROLE_MENU_VISIBILITY: Record<Role, Set<string>> = {
     '/dashboard', '/orders', '/products',
     '/agents', '/agents/exceptions', '/agents/approvals', '/inbox', '/customer-service', '/reviews', '/promotions',
     '/ads', '/inventory', '/livestream', '/reports',
-    '/stores', '/settings/stores', '/settings/models',
+    '/stores', '/settings/models',
     '/settings/billing', '/settings/audit-logs', '/settings/notifications',
     '/settings/guide', '/setup',
   ]),
   Approver: new Set([
     '/dashboard', '/orders', '/products',
     '/agents', '/agents/exceptions', '/agents/approvals', '/inbox', '/customer-service', '/reviews', '/promotions',
-    '/ads', '/inventory', '/livestream', '/reports', '/api-config',
+    '/ads', '/inventory', '/livestream', '/reports',
     '/setup', // D10: 自动化配置 front door for the /agents expert view
-    '/stores', '/settings/stores', '/settings/billing',
+    '/stores', '/settings/billing',
     '/settings/guide',
   ]),
   Finance: new Set(['/dashboard', '/settings/billing']),
   Viewer: new Set([
     '/dashboard', '/orders', '/products',
     '/agents', '/agents/exceptions', '/agents/approvals', '/inbox', '/customer-service', '/reviews', '/promotions',
-    '/ads', '/inventory', '/livestream', '/reports', '/api-config',
+    '/ads', '/inventory', '/livestream', '/reports',
     '/setup', // D10: 自动化配置 front door for the /agents expert view
-    '/stores', '/settings/stores', '/settings/models',
+    '/stores', '/settings/models',
     '/settings/billing', '/settings/audit-logs', '/settings/guide',
   ]),
 };

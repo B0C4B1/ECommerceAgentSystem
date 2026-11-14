@@ -8,7 +8,7 @@ export function LiveMonitorCard() {
   const { t } = useI18n();
   const [syncing, setSyncing] = useState(false);
   const [pinning, setPinning] = useState(false);
-  const [lastSync, setLastSync] = useState('2h ago');
+  const [lastSync, setLastSync] = useState(() => t('inbox.hoursAgo', { hours: 2 }));
   const [products, setProducts] = useState(mockLiveProducts.map(p => ({ ...p })));
 
   const handlePin = (id: number) => {
@@ -20,7 +20,7 @@ export function LiveMonitorCard() {
     setSyncing(true);
     setTimeout(() => {
       setSyncing(false);
-      setLastSync('just now');
+      setLastSync(t('inbox.justNow'));
       message.success(t('live.syncDone'));
     }, 2000);
   };
@@ -29,6 +29,7 @@ export function LiveMonitorCard() {
     setPinning(true);
     setTimeout(() => {
       setPinning(false);
+      setProducts(prev => prev.map(p => ({ ...p, pinned: true })));
       message.success(t('live.pinDone'));
     }, 1500);
   };

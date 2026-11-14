@@ -8,13 +8,21 @@ export function AfterSalesQueueCard() {
   const { t } = useI18n();
   const [auditing, setAuditing] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [lastProcess, setLastProcess] = useState('30m ago');
+  const [lastProcess, setLastProcess] = useState(() => t('inbox.minutesAgo', { minutes: 30 }));
+
+  const [tickets, setTickets] = useState(() => mockAfterSalesTickets.map(t => ({ ...t })));
 
   const handleAudit = () => {
     setAuditing(true);
     setTimeout(() => {
       setAuditing(false);
-      setLastProcess('just now');
+      // 审核扫描会把低风险的咨询工单自动通过，结果必须体现在工单状态上。
+      setTickets(prev => prev.map(t =>
+        t.status === 'pending_review' && t.type === 'consult'
+          ? { ...t, status: 'auto_approved' as const }
+          : t
+      ));
+      setLastProcess(t('inbox.justNow'));
       message.success(t('aftersales.auditDone'));
     }, 2000);
   };
@@ -23,11 +31,12 @@ export function AfterSalesQueueCard() {
     setProcessing(true);
     setTimeout(() => {
       setProcessing(false);
+      setTickets(prev => prev.map(t =>
+        t.status === 'pending_review' ? { ...t, status: 'processed' as const } : t
+      ));
       message.success(t('aftersales.processDone'));
     }, 1500);
   };
-
-  const [tickets, setTickets] = useState(() => mockAfterSalesTickets.map(t => ({ ...t })));
 
   const handleProcess = (id: string) => {
     setTickets(prev => prev.map(t => (t.id === id ? { ...t, status: 'processed' } : t)));

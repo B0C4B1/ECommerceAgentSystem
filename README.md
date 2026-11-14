@@ -5,7 +5,7 @@
 ## 开发范围
 
 - 前端源码、配置、资源和依赖均位于 `arkops-portal/`。
-- 产品设计、审计记录和业务场景文档位于 `arkops-portal/docs/product/`。
+- 产品权威设计为 `arkops-portal/product-design.md`；变更记录、路线图与竞品情报位于 `arkops-portal/docs/product/`。
 - 前端对接所需的 API 契约和店铺登录文档位于 `arkops-portal/docs/integration/`；外部后端及 Agent runtime 的实现由独立项目负责。
 - 后续开发保持此范围，项目根目录仅维护仓库说明和开发约定。
 
@@ -31,6 +31,10 @@ npm run build
 
 - [前端开发指南](arkops-portal/README.md)
 - [产品设计](arkops-portal/product-design.md)
+- [迭代记录](arkops-portal/docs/product/iteration-log.md)
+- [迭代路线图](arkops-portal/docs/product/roadmap.md)
+- [竞品分析](arkops-portal/docs/product/competitive-analysis.md)
+- [开发约定](AGENTS.md)
 - [API 和数据约定](arkops-portal/docs/integration/api-data-conventions.md)
 - [SaaS API 规格](arkops-portal/docs/integration/AllMall_SaaS_API_Specification_V0.2.html)
 - [SaaS 与 Agent 接口规格](arkops-portal/docs/integration/AllMall_SaaS_Agent_Interface_Specification_V0.3.html)

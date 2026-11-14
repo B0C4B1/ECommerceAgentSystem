@@ -19,12 +19,14 @@
  */
 import { ArrowRightOutlined, CheckOutlined, ClockCircleOutlined, CloseOutlined, RobotOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Col, Row, Space, Steps, Tag, Typography, message } from 'antd';
+import { Alert, Button, Col, Row, Space, Spin, Steps, Tag, Typography, message } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { approvalsApi } from '../../api/approvals';
+import { outcomesApi } from '../../api/outcomes';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { DescriptionPanel } from '../../components/detail/DescriptionPanel';
 import { DetailSection } from '../../components/detail/DetailSection';
 import { EmptyState } from '../../components/EmptyState';
@@ -43,6 +45,7 @@ import { ApprovalDecisionModal, type ApprovalDecision } from './ApprovalDecision
 
 export function ApprovalDetailPage() {
   const { t } = useI18n();
+  const { can } = usePermission();
   const navigate = useNavigate();
   const { approvalId } = useParams();
   const parsedApprovalId = parseAllMallId(approvalId);
@@ -55,21 +58,39 @@ export function ApprovalDetailPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const { data: approval } = useQuery({
+  const { data: approval, isLoading } = useQuery({
     queryKey: ['approval', parsedApprovalId],
     queryFn: () => approvalsApi.get(parsedApprovalId!),
     enabled: parsedApprovalId !== undefined
   });
+  // S2 回执：审批对目标的影响直接在这里可查，不用再跳去别处猜。
+  const { data: outcomes } = useQuery({
+    queryKey: ['outcomes', approval?.storeId],
+    queryFn: () => outcomesApi.list(approval!.storeId),
+    enabled: Boolean(approval?.storeId)
+  });
+  const outcome = outcomes?.find((item) => item.approvalId === approval?.id);
   const decide = useMutation({
     mutationFn: ({ status, note }: { status: ApprovalDecision; note?: string }) =>
       approvalsApi.decide(parsedApprovalId!, status, note),
     onSuccess: (result) => {
       setPendingDecision(null);
-      if (result && !result.finalized) {
+      if (!result) {
+        // 已决策 / 双标签页重复提交时接口返回 undefined，不能再提示“已更新”。
+        message.warning(t('approvalDetail.alreadyDecided'));
+      } else if (!result.finalized) {
         message.info(
           t('approvalDetail.dualFirstRecorded', {
             completed: result.approvalsCompleted,
             required: result.approvalsRequired
+          })
+        );
+      } else if (result.outcome && result.outcome.status === 'realized') {
+        // S1 回执：明确告诉人这次决定带来了多少目标进度，而不是笼统的“已更新”。
+        message.success(
+          t('approvalDetail.syncedToGoal', {
+            value: `¥${result.outcome.actualImpact ?? result.outcome.expectedImpact}`,
+            goal: t(`goal.metric_${result.outcome.metric}`)
           })
         );
       } else {
@@ -78,10 +99,44 @@ export function ApprovalDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['approval', parsedApprovalId] });
       queryClient.invalidateQueries({ queryKey: ['approvals'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      // S1: 决策会改写目标进度与效果账本，Dashboard/工作台/审计必须一起刷新。
+      queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['outcomes'] });
+      // P27: 审批决策会回写/作废归因账本，工作台复盘卡必须同步。
+      queryClient.invalidateQueries({ queryKey: ['reviewOutcomes'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
     }
   });
 
-  if (!approval) return <EmptyState description={t('approval.notFound')} />;
+  if (isLoading) {
+    return (
+      <div className="page-stack">
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 80 }}>
+          <Spin size="large" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!approval) {
+    return (
+      <div className="page-stack">
+        <PageHeader
+          title={t('approval.notFound')}
+          breadcrumb={[{ title: t('inbox.title'), href: '/inbox' }]}
+          onBack={() => navigate(-1)}
+        />
+        <EmptyState
+          description={t('approval.notFoundDesc')}
+          actionText={t('approval.backToInbox')}
+          onAction={() => navigate('/inbox?type=approval')}
+        />
+      </div>
+    );
+  }
 
   const urgency = getApprovalUrgency(approval, clock);
   const isDual = urgency?.policy.action === 'dual_approval';
@@ -102,7 +157,7 @@ export function ApprovalDetailPage() {
         ]}
         onBack={() => navigate(-1)}
         actions={
-          isPending ? (
+          isPending && can('approvals', 'approve') ? (
             <Space wrap>
               <Button icon={<CloseOutlined />} danger onClick={() => setPendingDecision('rejected')}>
                 {t('approvals.reject')}
@@ -204,6 +259,31 @@ export function ApprovalDetailPage() {
       <DetailSection title={t('approvals.detail')}>
         <Typography.Paragraph style={{ marginBottom: 0 }}>{approval.proposedAction}</Typography.Paragraph>
       </DetailSection>
+
+      {/* S2 回执：决策后这条审批对目标的影响落在哪，一眼可见 */}
+      {outcome && (
+        <DetailSection title={t('cycle.outcomeTitle')}>
+          <Space wrap size={12}>
+            <Tag color={outcome.status === 'realized' ? 'green' : outcome.status === 'lost' ? 'default' : 'blue'}>
+              {t(`cycle.outcomeStatus_${outcome.status}`)}
+            </Tag>
+            <Typography.Text type="secondary">
+              {t('cycle.outcomeExpected', { value: `¥${outcome.expectedImpact}` })}
+            </Typography.Text>
+            {outcome.actualImpact !== undefined && (
+              <Typography.Text strong style={{ color: 'var(--ark-green)' }}>
+                {t('cycle.outcomeActual', { value: `¥${outcome.actualImpact}` })}
+              </Typography.Text>
+            )}
+          </Space>
+          <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+            {outcome.targetLabel} · {t('cycle.outcomeRecordedAt', { time: dayjs(outcome.recordedAt).format('MM-DD HH:mm') })}
+          </Typography.Paragraph>
+          <div style={{ marginTop: 8 }}>
+            <Link to={`/dashboard?storeId=${approval.storeId}`}>{t('approvalDetail.viewGoal')}</Link>
+          </div>
+        </DetailSection>
+      )}
 
       {/* B3: real structured before/after evidence with computed deltas */}
       <DetailSection

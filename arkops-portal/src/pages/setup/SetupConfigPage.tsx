@@ -22,7 +22,6 @@ import {
   ShoppingOutlined,
   SmileOutlined,
   ThunderboltOutlined,
-  WifiOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -30,8 +29,8 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Drawer,
-  Empty,
   Input,
   InputNumber,
   Popconfirm,
@@ -39,9 +38,7 @@ import {
   Segmented,
   Select,
   Space,
-  Statistic,
   Switch,
-  Table,
   Tag,
   Typography,
   message,
@@ -50,24 +47,28 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { agentsApi } from '../../api/agents';
 import {
+  AUTONOMY_MIN_DECIDED,
+  getAutonomyAdvice,
+  type AutonomyAdvice,
+} from '../../api/autonomyAdvice';
+import {
   computeEnableClosure,
   scenarioDefinitions,
   scenarioRiskLevel,
   scenariosApi,
-  TRUST_STREAK_THRESHOLD,
   type ScenarioDefinition,
 } from '../../api/scenarioData';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { EnableAllReviewModal } from '../../components/agents/EnableAllReviewModal';
+import { StoreAgentProfileCard } from '../../components/agents/StoreAgentProfileCard';
 import { PageHeader } from '../../components/PageHeader';
-import { SERVICE_ICONS, getSessionHealthColor, renderSessionTag } from '../../utils/storeDisplay';
 import type {
   AgentType,
   AutonomyLevel,
   ScenarioKey,
   ScenarioStoreOverride,
-  Store,
 } from '../../types/domain';
 
 const SCENARIO_ICONS: Record<ScenarioKey, React.ReactNode> = {
@@ -101,12 +102,27 @@ const AUTONOMY_LEVELS: AutonomyLevel[] = ['L1', 'L2', 'L3'];
 
 export function SetupConfigPage() {
   const { t } = useI18n();
+  const { can } = usePermission();
+  const canUpdateSetup = can('setup', 'update');
+  const canCreateStore = can('stores', 'create');
   const queryClient = useQueryClient();
 
   const { data: storesData = [] } = useQuery({ queryKey: ['stores'], queryFn: () => storesApi.list() });
   const { data: allAgents = [] } = useQuery({ queryKey: ['agents'], queryFn: () => agentsApi.list() });
   const { data: scenarios = [] } = useQuery({ queryKey: ['scenarios'], queryFn: scenariosApi.list });
+  // P31.2：信任累积不再读静态计数，改为近 7 天账本 + 升级的实测证据。
+  const { data: autonomyAdvice = [] } = useQuery({
+    queryKey: ['autonomyAdvice'],
+    queryFn: () => getAutonomyAdvice(),
+  });
+  const adviceByScenario = useMemo(
+    () => new Map(autonomyAdvice.map((advice) => [advice.scenarioKey, advice])),
+    [autonomyAdvice],
+  );
   const { data: digest } = useQuery({ queryKey: ['scenario-digest'], queryFn: scenariosApi.getWeeklyDigest });
+  const attentionStoreCount = storesData.filter((store) =>
+    ['login_required', 'expired', 'pending_login', 'revoked'].includes(store.status)
+  ).length;
 
   // ===== 场景激活（风险分组确认弹窗） =====
   const [activatingKey, setActivatingKey] = useState<ScenarioKey | null>(null);
@@ -175,6 +191,7 @@ export function SetupConfigPage() {
     onSuccess: (_state, input) => {
       const def = scenarioDefinitions.find((d) => d.key === input.key);
       queryClient.invalidateQueries({ queryKey: ['scenarios'] });
+      queryClient.invalidateQueries({ queryKey: ['autonomyAdvice'] });
       message.success(
         t('scenario.autonomyChanged', {
           name: def ? t(def.nameKey) : input.key,
@@ -184,6 +201,7 @@ export function SetupConfigPage() {
     },
   });
 
+  // ===== 店铺级策略（P1：店铺自主等级覆盖场景默认） =====
   const dismissMutation = useMutation({
     mutationFn: (key: ScenarioKey) => scenariosApi.dismissTrustSuggestion(key),
     onSuccess: () => {
@@ -256,15 +274,49 @@ export function SetupConfigPage() {
     saveOverrideMutation.mutate({ key: overrideScenario, storeId: overrideStoreId, values: overrideValues });
   };
 
+  /** P31.2：把建议口径摊开成一行可核对的话，复盘卡与 /setup 共用同一套阈值。 */
+  const adviceReasonText = (advice: AutonomyAdvice) => {
+    const { evidence } = advice;
+    const level = t(`scenario.autonomy${advice.current}`);
+    switch (advice.reason) {
+      case 'insufficient_sample':
+        return t('agenttrust.adviceInsufficient', {
+          decided: evidence.decided,
+          human: evidence.humanDecisions,
+          required: AUTONOMY_MIN_DECIDED,
+          level,
+        });
+      case 'loosen_strong':
+        return t('agenttrust.adviceLoosenBody', {
+          fulfillment: evidence.fulfillmentRate ?? '—',
+          failure: evidence.failureRate ?? '—',
+          override: evidence.overrideRate ?? '—',
+        });
+      case 'tighten_failure':
+        return t('agenttrust.adviceTightenFailure', { rate: evidence.failureRate ?? 0 });
+      case 'tighten_override':
+        return t('agenttrust.adviceTightenOverride', { rate: evidence.overrideRate ?? 0 });
+      default:
+        return t('agenttrust.adviceEvidence', {
+          decided: evidence.decided,
+          fulfillment: evidence.fulfillmentRate ?? '—',
+          override: evidence.overrideRate ?? '—',
+          level,
+        });
+    }
+  };
+
   return (
     <div className="page-stack">
       <PageHeader
         title={t('scenario.pageTitle')}
         description={t('scenario.pageDesc')}
         actions={
-          <Link to="/agents">
-            <Button icon={<RobotOutlined />}>{t('scenario.advancedEntry')}</Button>
-          </Link>
+          canCreateStore ? (
+            <Link to="/stores/onboarding?journey=import">
+              <Button type="primary" icon={<PlusOutlined />}>{t('setup.addStore')}</Button>
+            </Link>
+          ) : undefined
         }
       />
 
@@ -290,13 +342,14 @@ export function SetupConfigPage() {
           const riskColor = risk === 'high' ? 'red' : risk === 'medium' ? 'orange' : 'green';
           const riskLabel = risk === 'high' ? t('agent.highRisk') : risk === 'medium' ? t('agent.mediumRisk') : t('agent.lowRisk');
           const overrideCount = state ? Object.keys(state.storeOverrides).length : 0;
-          const nextLevel: AutonomyLevel | null =
-            state?.autonomy === 'L1' ? 'L2' : state?.autonomy === 'L2' ? 'L3' : null;
+          const advice = adviceByScenario.get(def.key);
+          // P31.2：只有「已启用」且证据支持动等级的场景才提示；维持当前等级时只展示证据。
           const showTrustSuggestion =
             Boolean(state?.enabled) &&
-            (state?.approvedRunsStreak ?? 0) >= TRUST_STREAK_THRESHOLD &&
-            !state?.trustSuggestionDismissed &&
-            nextLevel !== null;
+            Boolean(advice) &&
+            advice!.direction !== 'keep' &&
+            !state?.trustSuggestionDismissed;
+          const showEvidenceLine = Boolean(state?.enabled) && Boolean(advice);
 
           return (
             <Col xs={24} lg={12} key={def.key}>
@@ -386,7 +439,7 @@ export function SetupConfigPage() {
                   </Typography.Text>
                   <Segmented
                     size="small"
-                    disabled={!state?.enabled}
+                    disabled={!state?.enabled || !canUpdateSetup}
                     value={state?.autonomy ?? 'L1'}
                     options={AUTONOMY_LEVELS.map((level) => ({
                       label: t(`scenario.autonomy${level}`),
@@ -399,39 +452,76 @@ export function SetupConfigPage() {
                   <Typography.Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
                     {t(`scenario.autonomy${state?.autonomy ?? 'L1'}Hint`)}
                   </Typography.Text>
+                  {/* S4：讲清楚“这个等级下，哪些动作会直接执行、不再找人” */}
+                  <Typography.Text style={{ fontSize: 10, display: 'block', marginTop: 2 }}>
+                    {t('setup.autonomyAutoPreview', {
+                      risk: t(`setup.autoRisk_${state?.autonomy ?? 'L1'}`),
+                    })}
+                  </Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2 }}>
+                    {t('setup.autonomyScopeNote')}
+                    <Link to="/dashboard" style={{ marginLeft: 8 }}>
+                      {t('setup.viewInDashboard')}
+                    </Link>
+                  </Typography.Text>
+                  {/* P31.2：把「信任累积」的实测依据摊开，人能看到建议背后的数字 */}
+                  {showEvidenceLine && advice && (
+                    <Typography.Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2 }}>
+                      {adviceReasonText(advice)}
+                    </Typography.Text>
+                  )}
                 </div>
 
-                {/* D3: 信任累积建议 */}
-                {showTrustSuggestion && state && nextLevel && (
+                {/* P31.2: 信任累积建议 — 证据来自近 7 天账本与人工决策，不再读静态计数 */}
+                {showTrustSuggestion && state && advice && (
                   <Alert
-                    type="success"
+                    type={advice.direction === 'loosen' ? 'success' : 'warning'}
                     showIcon
                     style={{ marginBottom: 12 }}
-                    message={t('agenttrust.trustSuggestion', {
-                      name: t(def.nameKey),
-                      count: state.approvedRunsStreak,
-                      level: t(`scenario.autonomy${nextLevel}`),
-                    })}
+                    message={t(
+                      advice.direction === 'loosen'
+                        ? 'agenttrust.adviceLoosenTitle'
+                        : 'agenttrust.adviceTightenTitle',
+                      {
+                        name: t(def.nameKey),
+                        from: t(`scenario.autonomy${advice.current}`),
+                        to: t(`scenario.autonomy${advice.recommended}`),
+                      },
+                    )}
+                    description={
+                      <Typography.Text style={{ fontSize: 12 }}>
+                        {adviceReasonText(advice)}
+                      </Typography.Text>
+                    }
                     action={
-                      <Space direction="vertical" size={4}>
-                        <Button
-                          size="small"
-                          type="primary"
-                          onClick={() => autonomyMutation.mutate({ key: def.key, level: nextLevel })}
-                        >
-                          {t('agenttrust.applySuggestion')}
-                        </Button>
-                        <Button size="small" onClick={() => dismissMutation.mutate(def.key)}>
-                          {t('agenttrust.dismissSuggestion')}
-                        </Button>
-                      </Space>
+                      canUpdateSetup ? (
+                        <Space direction="vertical" size={4}>
+                          <Button
+                            size="small"
+                            type={advice.direction === 'loosen' ? 'primary' : 'default'}
+                            danger={advice.direction === 'tighten'}
+                            onClick={() =>
+                              autonomyMutation.mutate({ key: def.key, level: advice.recommended })
+                            }
+                          >
+                            {t(
+                              advice.direction === 'loosen'
+                                ? 'agenttrust.applySuggestion'
+                                : 'agenttrust.adviceTightenOne',
+                            )}
+                          </Button>
+                          <Button size="small" onClick={() => dismissMutation.mutate(def.key)}>
+                            {t('agenttrust.dismissSuggestion')}
+                          </Button>
+                        </Space>
+                      ) : null
                     }
                   />
                 )}
 
                 {/* 操作 */}
                 <Space wrap>
-                  {state?.enabled ? (
+                  {canUpdateSetup && (state?.enabled ? (
                     <Popconfirm
                       title={t('scenario.disable')}
                       description={t('scenario.disableConfirm')}
@@ -452,7 +542,7 @@ export function SetupConfigPage() {
                     >
                       {t('scenario.enable')}
                     </Button>
-                  )}
+                  ))}
                   <Button
                     size="small"
                     icon={<SettingOutlined />}
@@ -473,116 +563,35 @@ export function SetupConfigPage() {
         })}
       </Row>
 
-      {/* ===== 店铺管理（显式"配置"按钮，D1） ===== */}
-      <Card
-        title={<><ShopOutlined style={{ marginRight: 8 }} />{t('setup.storeManagement')}</>}
-        style={{ marginBottom: 16 }}
-        extra={
-          <Link to="/stores/new">
-            <Button type="primary" size="small" icon={<PlusOutlined />}>新增店铺</Button>
-          </Link>
-        }
-      >
-        {storesData.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未连接任何店铺">
-            <Link to="/stores/new">
-              <Button type="primary" icon={<PlusOutlined />}>连接我的店铺</Button>
-            </Link>
-          </Empty>
-        ) : (
-          <Table
-            rowKey="id"
-            dataSource={storesData}
-            pagination={false}
-            size="small"
-            columns={[
-              { title: '店铺名称', dataIndex: 'name', render: (v: string) => <Typography.Text strong>{v}</Typography.Text> },
-              { title: '所属平台', dataIndex: 'platform', width: 120 },
-              {
-                title: <><WifiOutlined /> 会话状态</>, dataIndex: 'status', width: 120,
-                render: (_status: string, record: Store) => (
-                  <Space size={4}>
-                    <span style={{
-                      display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-                      background: getSessionHealthColor(record.status) === 'green' ? 'var(--ark-green)' : getSessionHealthColor(record.status) === 'red' ? 'var(--ark-red)' : getSessionHealthColor(record.status) === 'orange' ? 'var(--ark-orange)' : 'var(--ark-muted)',
-                      flexShrink: 0
-                    }} />
-                    {renderSessionTag(record.status, t)}
-                  </Space>
-                )
-              },
-              {
-                title: '开通服务', dataIndex: 'connections',
-                render: (connections: Store['connections']) => {
-                  if (!connections || connections.length === 0) return <Typography.Text type="secondary">-</Typography.Text>;
-                  return (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {connections.map((c) => (
-                        <Tag key={c.id} icon={SERVICE_ICONS[c.serviceType] ?? SERVICE_ICONS.other}>
-                          {c.serviceName}
-                        </Tag>
-                      ))}
-                    </div>
-                  );
-                }
-              },
-              {
-                title: t('common.actions'), width: 150,
-                render: (_: unknown, record: Store) => (
-                  <Space size={4}>
-                    <Button size="small" icon={<SettingOutlined />} onClick={() => openOverrideDrawer('pricing_promo', String(record.id))}>
-                      {t('scenario.perStoreConfig')}
-                    </Button>
-                    <Link to={`/stores/${record.id}`}>
-                      <Button size="small" type="link" style={{ paddingInline: 4 }}>店铺设置</Button>
-                    </Link>
-                  </Space>
-                )
-              },
-            ]}
-          />
-        )}
-      </Card>
+      {/* ===== B: Agent 店铺化 — 默认折叠，避免和场景卡抢注意力 ===== */}
+      <Collapse
+        size="small"
+        style={{ marginBottom: 16, background: 'var(--ark-panel)' }}
+        items={[
+          {
+            key: 'agentProfiles',
+            label: (
+              <Space size={6}>
+                <RobotOutlined />
+                <Typography.Text strong style={{ fontSize: 13 }}>{t('setup.agentProfileTitle')}</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('setup.agentProfileHint')}</Typography.Text>
+              </Space>
+            ),
+            children: <StoreAgentProfileCard embedded />,
+          },
+        ]}
+      />
 
-      {/* ===== D3: 周报摘要占位 ===== */}
-      {digest && (
-        <Card
-          title={<><CheckCircleOutlined style={{ marginRight: 8, color: 'var(--ark-green)' }} />{t('scenario.digestTitle')}</>}
-          extra={<Tag style={{ fontSize: 10 }}>{t('scenario.digestStub')}</Tag>}
-        >
-          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-            {digest.weekLabel}
+      {/* ===== 店铺只做摘要，管理动作统一回 /stores ===== */}
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Space size={8} wrap>
+          <ShopOutlined />
+          <Typography.Text>
+            {t('setup.storeSummary', { total: storesData.length, attention: attentionStoreCount })}
           </Typography.Text>
-          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-            <Col xs={12} sm={6}>
-              <Statistic title={t('scenario.digestActions')} value={digest.autonomousActions} valueStyle={{ color: 'var(--ark-green)', fontSize: 22 }} />
-            </Col>
-            <Col xs={12} sm={6}>
-              <Statistic title={t('scenario.digestApprovals')} value={digest.approvalsRequested} valueStyle={{ fontSize: 22 }} />
-            </Col>
-            <Col xs={12} sm={6}>
-              <Statistic title={t('scenario.digestApproved')} value={digest.approvalsApproved} suffix={`/ ${digest.approvalsRequested}`} valueStyle={{ fontSize: 22 }} />
-            </Col>
-            <Col xs={12} sm={6}>
-              <Statistic title={t('scenario.digestHoursSaved')} value={digest.hoursSaved} suffix="h" valueStyle={{ color: 'var(--ark-blue)', fontSize: 22 }} />
-            </Col>
-          </Row>
-          <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>
-            {t('scenario.digestPerScenario')}
-          </Typography.Text>
-          <Space size={8} wrap>
-            {digest.perScenario.map((row) => {
-              const def = scenarioDefinitions.find((d) => d.key === row.key);
-              if (!def) return null;
-              return (
-                <Tag key={row.key} style={{ fontSize: 11, borderLeft: `3px solid ${def.color}` }}>
-                  {t(def.nameKey)}: {row.actions} · {t('scenario.digestApprovals')} {row.approvals}
-                </Tag>
-              );
-            })}
-          </Space>
-        </Card>
-      )}
+          <Link to="/stores">{t('setup.goStoreManagement')} →</Link>
+        </Space>
+      </Card>
 
       {/* ===== 场景激活确认弹窗（复用风险分组审查组件） ===== */}
       <EnableAllReviewModal
@@ -604,7 +613,7 @@ export function SetupConfigPage() {
         open={overrideOpen}
         width={420}
         onClose={() => setOverrideOpen(false)}
-        footer={
+        footer={canUpdateSetup ? (
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button
               onClick={() => setOverrideValues(defaultsFor(overrideDef))}
@@ -620,24 +629,9 @@ export function SetupConfigPage() {
               {t('scenario.saveOverride')}
             </Button>
           </Space>
-        }
+        ) : null}
       >
         <Alert type="info" showIcon style={{ marginBottom: 16 }} message={t('scenario.perStoreNote')} />
-
-        <div style={{ marginBottom: 12 }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-            {t('scenario.pageTitle')}
-          </Typography.Text>
-          <Select
-            style={{ width: '100%' }}
-            value={overrideScenario}
-            onChange={(key: ScenarioKey) => {
-              setOverrideScenario(key);
-              loadOverride(key, overrideStoreId);
-            }}
-            options={scenarioDefinitions.map((def) => ({ value: def.key, label: t(def.nameKey) }))}
-          />
-        </div>
 
         <div style={{ marginBottom: 16 }}>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
@@ -664,6 +658,7 @@ export function SetupConfigPage() {
               {field.type === 'number' && (
                 <InputNumber
                   style={{ width: '100%' }}
+                  disabled={!canUpdateSetup}
                   min={field.min}
                   max={field.max}
                   prefix={field.prefix}
@@ -675,12 +670,14 @@ export function SetupConfigPage() {
               {field.type === 'switch' && (
                 <Switch
                   checked={Boolean(overrideValues[field.id])}
+                  disabled={!canUpdateSetup}
                   onChange={(checked) => setOverrideValues((prev) => ({ ...prev, [field.id]: checked }))}
                 />
               )}
               {field.type === 'text' && (
                 <Input
                   value={typeof overrideValues[field.id] === 'string' ? (overrideValues[field.id] as string) : ''}
+                  disabled={!canUpdateSetup}
                   onChange={(e) => setOverrideValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
                 />
               )}

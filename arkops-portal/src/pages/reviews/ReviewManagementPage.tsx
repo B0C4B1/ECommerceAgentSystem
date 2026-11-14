@@ -12,17 +12,19 @@ import {
 } from '@ant-design/icons';
 import {
   Alert, Avatar, Button, Card, Col, Empty, Input, Modal, Progress, Popconfirm,
-  Row, Segmented, Select, Space, Spin, Switch, Table, Tag, Typography, message,
+  Row, Segmented, Select, Space, Switch, Table, Tag, Typography, message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { reviewsApi } from '../../api/reviews';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { useStoreScope } from '../../app/storeScope';
+import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import { ReviewAnalysis } from './ReviewAnalysis';
-import type { AllMallId, Review, ReviewRating, ReviewTemplate } from '../../types/domain';
+import type { Review, ReviewRating, ReviewTemplate } from '../../types/domain';
 
 function StarRating({ rating }: { rating: ReviewRating }) {
   return (
@@ -48,7 +50,11 @@ function SentimentTag({ sentiment }: { sentiment: Review['sentiment'] }) {
 export function ReviewManagementPage() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const [storeFilter, setStoreFilter] = useState<AllMallId | undefined>();
+  const { scope } = useStoreScope();
+  const { can } = usePermission();
+  const canUpdateReviews = can('reviews', 'update');
+  // Store filtering is shell-level (D3); the page no longer owns a store select.
+  const storeFilter = scope === 'all' ? undefined : scope;
   const [ratingFilter, setRatingFilter] = useState<string>('all');
   const [sentimentFilter, setSentimentFilter] = useState<string | undefined>();
   const [repliedFilter, setRepliedFilter] = useState<string>('all');
@@ -111,11 +117,15 @@ export function ReviewManagementPage() {
   // Agent: scan all unreplied reviews
   const handleAgentScan = async () => {
     setAgentScanning(true);
-    await new Promise((r) => setTimeout(r, 1500));
+    const all = await reviewsApi.list({ storeId: storeFilter });
+    const targets = all.filter((r) => r.sentiment === 'negative' && !r.replied);
     setAgentScanning(false);
+    setRatingFilter('all');
+    setSearch('');
     setSentimentFilter('negative');
     setRepliedFilter('unreplied');
-    message.info(t('reviews.agentScanned', { count: negativeCount + unrepliedCount }));
+    // 提示里的数字必须等于筛选后的行数：负面且未回复的交集，而不是两数相加。
+    message.info(t('reviews.agentScanned', { count: targets.length }));
   };
 
   // Agent: AI generate reply suggestion for current review
@@ -126,7 +136,7 @@ export function ReviewManagementPage() {
     const suggestions: Record<string, string> = {
       positive: '感谢亲的五星好评！您的满意是我们最大的动力，新品即将上线，期待您的再次光临~',
       neutral: '感谢亲的反馈！我们会认真考虑您的建议，持续改进产品和服务。如有任何问题请随时联系我们。',
-      negative: '亲，非常抱歉给您带来不好的体验！我们已注意到您的问题，客服会第一时间联系您处理。同时为您申请了补偿，请您留意消息通知。',
+      negative: '亲，非常抱歉给您带来不好的体验！我们已注意到您的问题，会第一时间核实并给出处理方案，请留意消息通知。',
     };
     setReplyText(suggestions[replyTarget.sentiment] ?? suggestions.neutral);
     setAiSuggesting(false);
@@ -189,11 +199,11 @@ export function ReviewManagementPage() {
     },
     {
       title: '', key: 'actions', width: 100,
-      render: (_: unknown, r: Review) => (
+      render: (_: unknown, r: Review) => canUpdateReviews ? (
         <Button size="small" type={r.replied ? 'default' : 'primary'} onClick={() => openReply(r)}>
           {r.replied ? t('reviews.editReply') : t('reviews.reply')}
         </Button>
-      ),
+      ) : null,
     },
   ];
 
@@ -224,6 +234,7 @@ export function ReviewManagementPage() {
             <Switch
               checked={agentEnabled}
               onChange={setAgentEnabled}
+              disabled={!canUpdateReviews}
               checkedChildren="ON"
               unCheckedChildren="OFF"
               size="small"
@@ -234,7 +245,7 @@ export function ReviewManagementPage() {
               okText={t('common.confirm')}
               cancelText={t('common.cancel')}
             >
-              <Button size="small" icon={<ThunderboltOutlined />} type="primary" ghost disabled={!agentEnabled}>
+              <Button size="small" icon={<ThunderboltOutlined />} type="primary" ghost disabled={!agentEnabled || !canUpdateReviews}>
                 {t('reviews.autoReplyPositive')}
               </Button>
             </Popconfirm>
@@ -284,7 +295,7 @@ export function ReviewManagementPage() {
           icon={<WarningOutlined />}
           message={t('reviews.negativeAlert', { count: negativeCount })}
           style={{ margin: '0 24px 12px' }}
-          action={<Button size="small" onClick={() => setSentimentFilter('negative')}>{t('reviews.viewAll')}</Button>}
+          action={<Button size="small" onClick={() => { setRatingFilter('all'); setSearch(''); setRepliedFilter('all'); setSentimentFilter('negative'); }}>{t('reviews.viewAll')}</Button>}
         />
       )}
 
@@ -296,14 +307,6 @@ export function ReviewManagementPage() {
           onChange={(e) => setSearch(e.target.value)}
           style={{ width: 220 }}
           allowClear
-        />
-        <Select
-          value={storeFilter}
-          onChange={setStoreFilter}
-          allowClear
-          placeholder={t('cs.filterByStore')}
-          style={{ width: 140 }}
-          options={stores.map((s) => ({ value: s.id, label: s.name }))}
         />
         <Segmented
           size="small"

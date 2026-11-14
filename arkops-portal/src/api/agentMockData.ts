@@ -80,7 +80,7 @@ export const agentConfigs: AgentConfig[] = [
     modelBinding: { provider: 'OpenAI', model: 'gpt-4o' },
     retryPolicy: { maxRetries: 2, retryIntervalMinutes: 5 },
     timeoutMinutes: 30,
-    enabled: false,
+    enabled: true,
     strategyConfig: {
       adSpendBudget: { dailyCap: 500, monthlyCap: 10000, targetROI: 2.0, lookbackDays: 7 }
     }
@@ -105,7 +105,7 @@ export const agentConfigs: AgentConfig[] = [
     modelBinding: { provider: 'OpenAI', model: 'gpt-4o-mini' },
     retryPolicy: { maxRetries: 1, retryIntervalMinutes: 5 },
     timeoutMinutes: 15,
-    enabled: false,
+    enabled: true,
     strategyConfig: {
       pricingRule: {
         mode: 'market',
@@ -296,7 +296,7 @@ export const agentConfigs: AgentConfig[] = [
     modelBinding: { provider: 'DeepSeek', model: 'deepseek-chat' },
     retryPolicy: { maxRetries: 1, retryIntervalMinutes: 10 },
     timeoutMinutes: 10,
-    enabled: false,
+    enabled: true,
     strategyConfig: {
       inventoryConfig: { lowStockThreshold: 50, deadStockDays: 30, autoReplenishEnabled: true, replenishLeadTimeDays: 7 }
     }

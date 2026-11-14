@@ -1,31 +1,29 @@
 /**
  * File: CreateProductModal.tsx
- * Purpose: "New product" flow (product-design.md §3.14.6, master-first) — two entry
- * points sharing one modal shell: manual creation (SPU code/name/category/cost/total
- * stock → a zero-listing master; the code entered becomes the clean merge key for
- * future store-sync imports, D6 sub-decision 4) or upload-and-recognize (AI seeds the
- * master from a picked primary store's conventions, mirroring the product_launch
- * Agent's recognition flow). Either way the created product lands with `onCreated`,
- * which the caller uses to navigate to the detail page's prominent "list it" CTA.
+ * Purpose: "New product" flow (product-design.md §3.14.6, master-first). The products
+ * page has exactly one creation entry — upload images and let AI seed the master. This
+ * replaces the old three-way dropdown (manual / recognize / hand off to the
+ * product_launch Agent): the Agent detour just added a second selection step before
+ * reaching the same upload surface. The created product lands with `onCreated`, which
+ * the caller uses to navigate to the detail page's prominent "list it" CTA.
  *
  * Author: Michael Lee
  * Created: 2026-07-24
  *
  * Main exports:
- * - CreateProductModal: modal form for both creation modes.
+ * - CreateProductModal: upload-and-recognize creation modal.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, InputNumber, Modal, Select, Space, Typography, Upload, message } from 'antd';
 import type { UploadFile } from 'antd';
 import { CameraOutlined, PlusOutlined } from '@ant-design/icons';
 import { productsApi } from '../../api/products';
 import { useI18n } from '../../app/i18n';
-import type { AllMallId, Product, Store } from '../../types/domain';
+import type { Product, Store } from '../../types/domain';
 
 interface CreateProductModalProps {
   open: boolean;
-  mode: 'manual' | 'recognize';
   stores: Store[];
   onClose: () => void;
   onCreated: (product: Product) => void;
@@ -41,7 +39,7 @@ interface RecognizedDraft {
   images: string[];
 }
 
-export function CreateProductModal({ open, mode, stores, onClose, onCreated }: CreateProductModalProps) {
+export function CreateProductModal({ open, stores, onClose, onCreated }: CreateProductModalProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
@@ -66,6 +64,14 @@ export function CreateProductModal({ open, mode, stores, onClose, onCreated }: C
     onClose();
   };
 
+  // 店铺列表可能在弹窗挂载后才返回，Form.Item 的 initialValue 只会取第一次渲染的值，
+  // 这里在打开时补一次默认主店铺，避免下拉空白、提交时才报必填。
+  useEffect(() => {
+    if (open && stores.length > 0 && !form.getFieldValue('primaryStoreId')) {
+      form.setFieldsValue({ primaryStoreId: stores[0].id });
+    }
+  }, [open, stores, form]);
+
   const handleRecognize = async () => {
     setRecognizing(true);
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -81,59 +87,12 @@ export function CreateProductModal({ open, mode, stores, onClose, onCreated }: C
     setRecognizing(false);
   };
 
-  const handleManualSubmit = () => {
-    form.validateFields().then((values) => {
-      createMutation.mutate({
-        ...values,
-        images: [`https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(values.name)}&image_size=square`],
-      });
-    });
-  };
-
   const handleRecognizedSubmit = () => {
     form.validateFields(['primaryStoreId']).then(({ primaryStoreId }) => {
       if (!recognized) return;
       createMutation.mutate({ ...recognized, primaryStoreId });
     });
   };
-
-  if (mode === 'manual') {
-    return (
-      <Modal
-        title={t('products.createManualTitle')}
-        open={open}
-        onOk={handleManualSubmit}
-        okText={t('common.create')}
-        confirmLoading={createMutation.isPending}
-        onCancel={handleClose}
-        width={480}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item label={t('products.spuCode')} name="spuCode" rules={[{ required: true }]}>
-            <Input placeholder={t('products.spuCodePlaceholder')} />
-          </Form.Item>
-          <Form.Item label={t('products.name')} name="name" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label={t('products.category')} name="category" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label={t('products.cost')} name="cost" rules={[{ required: true }]}>
-            <InputNumber min={0} step={0.01} style={{ width: '100%' }} prefix="¥" />
-          </Form.Item>
-          <Form.Item label={t('products.totalStock')} name="totalStock" rules={[{ required: true }]}>
-            <InputNumber min={0} step={1} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item label={t('products.primaryStore')} name="primaryStoreId" rules={[{ required: true }]}>
-            <Select options={stores.map((s) => ({ value: s.id, label: s.name }))} />
-          </Form.Item>
-          <Form.Item label={t('products.descriptionLabel')} name="description">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-        </Form>
-      </Modal>
-    );
-  }
 
   return (
     <Modal

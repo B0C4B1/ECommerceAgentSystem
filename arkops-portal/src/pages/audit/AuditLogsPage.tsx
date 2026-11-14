@@ -7,6 +7,8 @@ import type { Dayjs } from 'dayjs';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auditLogsApi } from '../../api/auditLogs';
+import { agentsApi } from '../../api/agents';
+import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
 import { PageFilterBar } from '../../components/filters/PageFilterBar';
 import { PageHeader } from '../../components/PageHeader';
@@ -46,23 +48,38 @@ export function AuditLogsPage() {
   const [segment, setSegment] = useState<SegmentKey>('all');
   const [rawCategory, setRawCategory] = useState<AuditCategory | undefined>(undefined);
   const [actor, setActor] = useState<string | undefined>(undefined);
+  const [storeFilter, setStoreFilter] = useState<number | undefined>(undefined);
+  const [agentFilter, setAgentFilter] = useState<string | undefined>(undefined);
   const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const { data = [] } = useQuery({ queryKey: ['audit-logs'], queryFn: auditLogsApi.list });
+  const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: storesApi.list });
+  const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: agentsApi.list });
 
   const actors = useMemo(() => Array.from(new Set(data.map((i) => i.actor))).sort(), [data]);
+
+  /** S2：Agent 归因 — 审计项的深链已经指向 Agent 页，这里反解出是哪个 Agent 干的。 */
+  const agentTypeOf = (log: AuditLog): string | undefined => {
+    const matched = log.linkTo?.match(/^\/agents\/([^/?]+)/);
+    if (!matched || matched[1] === 'approvals') return undefined;
+    return agents.some((agent) => agent.agentType === matched[1]) ? matched[1] : undefined;
+  };
+  const storeNameOf = (storeId?: number) =>
+    storeId ? stores.find((store) => store.id === storeId)?.name : undefined;
 
   // Everything except the segment/category axis — segment counts derive from this,
   // so the numbers stay truthful under keyword/actor/date filtering.
   const baseFiltered = useMemo(() => {
     let items = data;
     if (actor) items = items.filter((i) => i.actor === actor);
+    if (storeFilter) items = items.filter((i) => i.storeId === storeFilter);
+    if (agentFilter) items = items.filter((i) => agentTypeOf(i) === agentFilter);
     if (range?.[0]) items = items.filter((i) => !dayjs(i.at).isBefore(range[0]!, 'day'));
     if (range?.[1]) items = items.filter((i) => !dayjs(i.at).isAfter(range[1]!, 'day'));
     if (keyword) items = items.filter((i) =>
       `${i.actor} ${i.action} ${i.entity} ${i.summary}`.toLowerCase().includes(keyword.toLowerCase())
     );
     return items;
-  }, [data, keyword, actor, range]);
+  }, [data, keyword, actor, storeFilter, agentFilter, range, agents]);
 
   const filtered = useMemo(() => {
     let items = baseFiltered;
@@ -92,6 +109,20 @@ export function AuditLogsPage() {
       ),
     },
     { title: t('audit.actor'), dataIndex: 'actor', width: 130 },
+    {
+      title: t('audit.store'),
+      width: 150,
+      render: (_: unknown, record: AuditLog) => storeNameOf(record.storeId) ?? '—',
+    },
+    {
+      title: t('audit.agent'),
+      width: 120,
+      render: (_: unknown, record: AuditLog) => {
+        const type = agentTypeOf(record);
+        if (!type) return '—';
+        return agents.find((agent) => agent.agentType === type)?.displayName ?? type;
+      },
+    },
     { title: t('audit.action'), dataIndex: 'action', width: 110 },
     { title: t('audit.entity'), dataIndex: 'entity', width: 80 },
     {
@@ -112,11 +143,13 @@ export function AuditLogsPage() {
   ];
 
   const handleExport = () => {
-    const headers = [t('audit.time'), t('audit.category'), t('audit.actor'), t('audit.action'), t('audit.entity'), t('audit.summary')];
+    const headers = [t('audit.time'), t('audit.category'), t('audit.actor'), t('audit.store'), t('audit.agent'), t('audit.action'), t('audit.entity'), t('audit.summary')];
     const rows = filtered.map((log) => [
       dayjs(log.at).format('YYYY-MM-DD HH:mm'),
       t(`audit.cat_${log.category}`),
       log.actor,
+      storeNameOf(log.storeId) ?? '',
+      agentTypeOf(log) ?? '',
       log.action,
       log.entity,
       `"${log.summary.replace(/"/g, '""')}"`
@@ -195,6 +228,28 @@ export function AuditLogsPage() {
               value={actor}
               onChange={(v) => setActor(v as string | undefined)}
               options={actors.map((name) => ({ value: name, label: name }))}
+            />
+            <Select
+              size="small"
+              style={{ minWidth: 140 }}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder={t('audit.storeFilter')}
+              value={storeFilter}
+              onChange={(v) => setStoreFilter(v as number | undefined)}
+              options={stores.map((store) => ({ value: store.id, label: store.name }))}
+            />
+            <Select
+              size="small"
+              style={{ minWidth: 140 }}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder={t('audit.agentFilter')}
+              value={agentFilter}
+              onChange={(v) => setAgentFilter(v as string | undefined)}
+              options={agents.map((agent) => ({ value: agent.agentType, label: agent.displayName }))}
             />
             <DatePicker.RangePicker
               size="small"

@@ -75,6 +75,66 @@ function sumRange(from: number, to: number, fn: (d: number) => number): number {
   return total;
 }
 
+/**
+ * Store-scoped operating baseline for goal negotiation (P29.1).
+ * Reuses the same deterministic daily GMV generator as the dashboard so the
+ * goal card and the business KPIs cannot tell two different stories.
+ */
+export interface StoreOperatingBaseline {
+  storeName: string;
+  /** Last 30 natural days GMV, store share applied. */
+  last30Gmv: number;
+  /** Previous 30 natural days GMV, for the month-over-month delta. */
+  previous30Gmv: number;
+  /** Calendar day of month today (1-based) and days in this month. */
+  monthDay: number;
+  daysInMonth: number;
+  /** Month-to-date GMV and the projection to month end at the recent daily pace. */
+  mtdGmv: number;
+  projectedMonthGmv: number;
+  /** Recent 14-day average daily GMV, store share applied. */
+  dailyAvg: number;
+  /** Ad spend month-to-date at the store's ad budget pace. */
+  mtdAdSpend: number;
+  roas: number;
+  /** P33.2 目标周期结算：上一个自然月的整月 GMV，与目标卡同源。 */
+  previousMonthGmv: number;
+}
+
+/** Returns null when the store is not part of the demo operating dataset. */
+export function getStoreOperatingBaseline(storeName: string): StoreOperatingBaseline | null {
+  const profile = STORE_PROFILES.find((p) => p.storeName === storeName);
+  if (!profile) return null;
+  const { share, roas } = profile;
+  const today = new Date();
+  const monthDay = today.getDate();
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const dailyAvg = Math.round((sumRange(0, 13, dailyGmv) / 14) * share);
+  const mtdGmv = Math.round(sumRange(0, monthDay - 1, dailyGmv) * share);
+  // P33.2：结算用的是「上一个自然月」，不是「近 30 天」——口径不同，不能混用。
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const prevMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const prevMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+  const daysAgoOf = (date: Date) => Math.round((todayStart.getTime() - date.getTime()) / 86400000);
+  const previousMonthGmv = Math.round(
+    // sumRange 要求偏移量从小到大：上月末偏移更小，上月初始偏移更大。
+    sumRange(daysAgoOf(prevMonthEnd), daysAgoOf(prevMonthStart), dailyGmv) * share,
+  );
+  return {
+    storeName,
+    last30Gmv: Math.round(sumRange(0, 29, dailyGmv) * share),
+    previous30Gmv: Math.round(sumRange(30, 59, dailyGmv) * share),
+    monthDay,
+    daysInMonth,
+    mtdGmv,
+    projectedMonthGmv: mtdGmv + dailyAvg * (daysInMonth - monthDay),
+    dailyAvg,
+    mtdAdSpend: Math.round(3840 * share * monthDay),
+    roas,
+    previousMonthGmv,
+  };
+}
+
 const RANGE_DAYS: Record<DashboardTimeRange, number> = { today: 1, '7d': 7, '30d': 30 };
 
 const COMPARISON_KEY: Record<DashboardTimeRange, string> = {
@@ -177,9 +237,9 @@ export const businessDashboardApi = {
       afterSales: {
         returnRate: 3.2,
         returnAmount: 916,
-        negativeReviews: 5,
-        respondedReviews: 3,
-        reviewResponseRate: 60,
+        negativeReviews: 6,
+        respondedReviews: 1,
+        reviewResponseRate: 17,
         storeRating: 4.5,
         disputes: { pending: 2, processing: 1 },
         avgResponseMinutes: 120,

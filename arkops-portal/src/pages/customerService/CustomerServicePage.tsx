@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react';
 import { customerServiceApi } from '../../api/customerService';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { useStoreScope } from '../../app/storeScope';
 import { MetricCard } from '../../components/metrics/MetricCard';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
@@ -50,10 +51,12 @@ function FullConsole({
   stores,
   initialSelectedId,
   initialStoreFilter,
+  storeFilterLocked = false,
 }: {
   stores: Store[];
   initialSelectedId?: AllMallId;
   initialStoreFilter?: AllMallId;
+  storeFilterLocked?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState<AllMallId | null>(initialSelectedId ?? null);
   const [statusFilter, setStatusFilter] = useState<SessionStatus | undefined>(undefined);
@@ -79,6 +82,7 @@ function FullConsole({
         onStatusFilterChange={setStatusFilter}
         onStoreFilterChange={setStoreFilter}
         onSearchChange={setSearch}
+        lockStoreFilter={storeFilterLocked}
       />
       <ChatArea session={selected} stores={stores} />
     </div>
@@ -87,6 +91,7 @@ function FullConsole({
 
 export function CustomerServicePage() {
   const { t } = useI18n();
+  const { scope, isAllStores } = useStoreScope();
   const { data: sessions = [] } = useQuery({
     queryKey: ['customerSessions', 'monitor'],
     queryFn: () => customerServiceApi.listSessions(),
@@ -98,13 +103,18 @@ export function CustomerServicePage() {
   const [consoleSeed, setConsoleSeed] = useState<{ sessionId?: AllMallId; storeId?: AllMallId }>({});
 
   const storeMap = useMemo(() => new Map(stores.map((s) => [s.id, s])), [stores]);
-  const summary = useMemo(() => computeCsSla(sessions), [sessions]);
+  // Shell-level store scope narrows every SLA metric and the fallback queue.
+  const scopedSessions = useMemo(
+    () => (isAllStores ? sessions : sessions.filter((s) => s.storeId === scope)),
+    [sessions, isAllStores, scope]
+  );
+  const summary = useMemo(() => computeCsSla(scopedSessions), [scopedSessions]);
   const byStore = useMemo(
     () =>
       stores
-        .map((store) => ({ store, sla: computeCsSla(sessions.filter((s) => s.storeId === store.id)) }))
+        .map((store) => ({ store, sla: computeCsSla(scopedSessions.filter((s) => s.storeId === store.id)) }))
         .filter((row) => row.sla.total > 0),
-    [stores, sessions]
+    [stores, scopedSessions]
   );
 
   // The fallback queue: pending conversations, worst first — needs-a-human and overdue
@@ -115,10 +125,10 @@ export function CustomerServicePage() {
       const toneScore = tone === 'breached' ? 2 : tone === 'warning' ? 1 : 0;
       return (s.needsHuman ? 4 : 0) + toneScore;
     };
-    return sessions
+    return scopedSessions
       .filter((s) => s.status === 'pending_reply')
       .sort((a, b) => rank(b) - rank(a) || pendingWaitSeconds(b) - pendingWaitSeconds(a));
-  }, [sessions]);
+  }, [scopedSessions]);
 
   if (stores.length === 0) {
     return <StoreConnectionEmptyState description={t('csmon.subtitle')} />;
@@ -273,7 +283,8 @@ export function CustomerServicePage() {
           key={consoleSeed.sessionId ?? consoleSeed.storeId ?? 'all'}
           stores={stores}
           initialSelectedId={consoleSeed.sessionId}
-          initialStoreFilter={consoleSeed.storeId}
+          initialStoreFilter={consoleSeed.storeId ?? (scope === 'all' ? undefined : scope)}
+          storeFilterLocked={!isAllStores}
         />
       </Drawer>
     </div>

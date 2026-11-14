@@ -4,6 +4,7 @@ import { stores, tasks } from './mockData';
 import { insertFirst, replaceItem } from './mockRepository';
 import { nextId } from './idGenerator';
 import { recordAuditLog } from './auditLogger';
+import { registerMockState } from './mockPersistence';
 import type {
   AgentConfig,
   AgentOutcomeRecord,
@@ -11,6 +12,7 @@ import type {
   AgentStrategyConfig,
   AgentType,
   AllMallId,
+  Store,
   Task,
   TaskStatus,
 } from '../types/domain';
@@ -19,6 +21,37 @@ export interface AgentListItem extends AgentConfig {
   runStats?: AgentRunStats;
   activeTaskCount?: number;
 }
+
+// ===== P28.4 Agent 健康态：把「卡住了」从隐性变成显式 =====
+
+export type AgentHealthIssueKind = 'auth_invalid' | 'upstream_disabled' | 'idle';
+
+export interface AgentHealthIssue {
+  kind: AgentHealthIssueKind;
+  /** 该问题影响的已启用 Agent 数量：授权失效是整店，其余是单个 Agent。 */
+  affectedAgentCount: number;
+  /** kind = upstream_disabled / idle：出问题的 Agent */
+  agentType?: AgentType;
+  displayName?: string;
+  /** kind = upstream_disabled：被依赖但未启用的上游 Agent */
+  upstream?: { agentType: AgentType; displayName: string }[];
+  /** kind = auth_invalid：授权已失效的店铺 */
+  storeId?: AllMallId;
+  storeName?: string;
+  storeStatus?: Store['status'];
+  /** kind = idle：连续多少天没有任何执行 */
+  idleDays?: number;
+}
+
+export interface AgentHealth {
+  enabledCount: number;
+  blockedAgentCount: number;
+  healthyCount: number;
+  issues: AgentHealthIssue[];
+}
+
+/** 连续多少个自然日无执行才算「空转」：低于 3 天可能只是当天还没轮询到。 */
+const IDLE_DAYS = 3;
 
 export const agentsApi = {
   list: (): Promise<AgentListItem[]> =>
@@ -37,6 +70,73 @@ export const agentsApi = {
     mockDelay(agentConfigs.find((a) => a.agentType === agentType)),
 
   getStats: (agentType: AgentType) => mockDelay(agentRunStatsMap[agentType]),
+
+  /**
+   * P28.4 健康态：只报告「已启用但跑不动」的 Agent，并给出人能处理的原因。
+   * 1) 店铺授权失效（非 connected）→ 该店所有已启用 Agent 都阻塞；
+   * 2) 上游 Agent 未启用 → 依赖门控无法通过；
+   * 3) 连续 IDLE_DAYS 天无任何执行 → 可能在空转。
+   * 未启用的 Agent 不算阻塞：那是人的选择，不是故障。
+   */
+  getHealth: (storeId?: AllMallId): Promise<AgentHealth> => {
+    const enabled = agentConfigs.filter((agent) => agent.enabled);
+    const store = storeId !== undefined ? stores.find((item) => item.id === storeId) : undefined;
+
+    if (store && store.status !== 'connected') {
+      return mockDelay({
+        enabledCount: enabled.length,
+        blockedAgentCount: enabled.length,
+        healthyCount: 0,
+        // 整店授权失效是一个问题，不是 N 个 Agent 各自出错。
+        issues: [
+          {
+            kind: 'auth_invalid',
+            affectedAgentCount: enabled.length,
+            storeId: store.id,
+            storeName: store.name,
+            storeStatus: store.status,
+          },
+        ],
+      });
+    }
+
+    const issues: AgentHealthIssue[] = [];
+    for (const agent of enabled) {
+      const upstream = agent.dependsOn
+        .map((dep) => agentConfigs.find((candidate) => candidate.agentType === dep))
+        .filter((dep): dep is AgentConfig => Boolean(dep) && !dep?.enabled)
+        .map((dep) => ({ agentType: dep.agentType, displayName: dep.displayName }));
+
+      if (upstream.length > 0) {
+        issues.push({
+          agentType: agent.agentType,
+          displayName: agent.displayName,
+          kind: 'upstream_disabled',
+          affectedAgentCount: 1,
+          upstream,
+        });
+        continue;
+      }
+
+      const recent = (agentRunStatsMap[agent.agentType]?.trend ?? []).slice(-IDLE_DAYS);
+      if (recent.length === IDLE_DAYS && recent.every((point) => point.runs === 0)) {
+        issues.push({
+          agentType: agent.agentType,
+          displayName: agent.displayName,
+          kind: 'idle',
+          affectedAgentCount: 1,
+          idleDays: IDLE_DAYS,
+        });
+      }
+    }
+
+    return mockDelay({
+      enabledCount: enabled.length,
+      blockedAgentCount: issues.reduce((sum, issue) => sum + issue.affectedAgentCount, 0),
+      healthyCount: enabled.length - issues.length,
+      issues,
+    });
+  },
 
   // WS-D (S4): mock "decisions & outcomes" records — action → metric before/after 3/7d → assessment.
   getOutcomes: (agentType: AgentType): Promise<AgentOutcomeRecord[]> =>
@@ -294,4 +394,53 @@ export const agentsApi = {
 
     return mockDelay(task);
   },
+
+  // Approving a draft ends the task; without this the draft stays in the active queue
+  // and could be approved repeatedly, creating duplicate products.
+  completeTask: (taskId: AllMallId, summary: string): Promise<Task | undefined> => {
+    const task = replaceItem(tasks, (t) => t.id === taskId, (current) => ({
+      ...current,
+      status: 'succeeded' as const,
+      updatedAt: new Date().toISOString(),
+      timeline: [
+        ...current.timeline,
+        {
+          id: Date.now(),
+          type: 'run_succeeded' as const,
+          title: '草稿已发布',
+          summary,
+          at: new Date().toISOString(),
+        },
+      ],
+    }));
+
+    if (task) {
+      recordAuditLog({
+        actor: '当前用户',
+        action: '发布商品草稿',
+        entity: '任务',
+        entityId: taskId,
+        summary: `任务已完成: ${task.title}`,
+        category: 'task',
+      });
+    }
+
+    return mockDelay(task);
+  },
 };
+
+// Agent 启停、策略配置与任务队列是用户操作结果，刷新后必须保持。
+registerMockState(
+  'agents.configs',
+  () => agentConfigs,
+  (value) => {
+    if (Array.isArray(value)) agentConfigs.splice(0, agentConfigs.length, ...(value as AgentConfig[]));
+  }
+);
+registerMockState(
+  'agents.tasks',
+  () => tasks,
+  (value) => {
+    if (Array.isArray(value)) tasks.splice(0, tasks.length, ...(value as Task[]));
+  }
+);

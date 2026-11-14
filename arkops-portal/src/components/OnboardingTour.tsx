@@ -75,7 +75,7 @@ export function OnboardingTour() {
       icon: stepIcons[0],
       title: t('onboarding.loop1Title'),
       desc: t('onboarding.loop1Desc'),
-      action: () => navigate('/agents/approvals'),
+      action: () => navigate('/inbox?type=approval'),
     },
     {
       icon: stepIcons[1],

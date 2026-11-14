@@ -16,6 +16,7 @@ import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
 import { customerServiceApi } from '../../api/customerService';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { QuickReplyPanel } from './QuickReplyPanel';
 import type { AllMallId, CustomerSession, QuickReplyTemplate, Store } from '../../types/domain';
 
@@ -26,6 +27,8 @@ interface Props {
 
 export function ChatArea({ session, stores }: Props) {
   const { t } = useI18n();
+  const { can } = usePermission();
+  const canUpdateCs = can('customer_service', 'update');
   const queryClient = useQueryClient();
   const [inputValue, setInputValue] = useState('');
   const [showQuickReplies, setShowQuickReplies] = useState(false);
@@ -128,26 +131,30 @@ export function ChatArea({ session, stores }: Props) {
           </div>
         </div>
         <Space>
-          <Button
-            size="small"
-            icon={<ThunderboltOutlined />}
-            type={showQuickReplies ? 'primary' : 'default'}
-            onClick={() => setShowQuickReplies(!showQuickReplies)}
-          >
-            {t('cs.quickReplies')}
-          </Button>
-          <Popconfirm
-            title={t('cs.escalateToHuman')}
-            description={t('cs.escalateConfirm')}
-            onConfirm={() => setEscalateModalOpen(true)}
-            okText={t('common.confirm')}
-            cancelText={t('common.cancel')}
-          >
-            <Button size="small" icon={<UserSwitchOutlined />}>
-              {t('cs.escalateToHuman')}
+          {canUpdateCs && (
+            <Button
+              size="small"
+              icon={<ThunderboltOutlined />}
+              type={showQuickReplies ? 'primary' : 'default'}
+              onClick={() => setShowQuickReplies(!showQuickReplies)}
+            >
+              {t('cs.quickReplies')}
             </Button>
-          </Popconfirm>
-          {session.status !== 'closed' && (
+          )}
+          {canUpdateCs && (
+            <Popconfirm
+              title={t('cs.escalateToHuman')}
+              description={t('cs.escalateConfirm')}
+              onConfirm={() => setEscalateModalOpen(true)}
+              okText={t('common.confirm')}
+              cancelText={t('common.cancel')}
+            >
+              <Button size="small" icon={<UserSwitchOutlined />}>
+                {t('cs.escalateToHuman')}
+              </Button>
+            </Popconfirm>
+          )}
+          {canUpdateCs && session.status !== 'closed' && (
             <Popconfirm
               title={t('cs.closeConfirm')}
               onConfirm={() => closeMutation.mutate()}
@@ -230,7 +237,7 @@ export function ChatArea({ session, stores }: Props) {
               if (inputValue.trim()) sendMutation.mutate();
             }
           }}
-          disabled={session.status === 'closed'}
+          disabled={session.status === 'closed' || !canUpdateCs}
           style={{ flex: 1 }}
         />
         <Button
@@ -238,7 +245,7 @@ export function ChatArea({ session, stores }: Props) {
           icon={<SendOutlined />}
           onClick={() => sendMutation.mutate()}
           loading={sendMutation.isPending}
-          disabled={!inputValue.trim() || session.status === 'closed'}
+          disabled={!inputValue.trim() || session.status === 'closed' || !canUpdateCs}
         />
       </div>
 

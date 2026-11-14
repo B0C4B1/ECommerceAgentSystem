@@ -1,6 +1,6 @@
 import { AppstoreOutlined, CheckCircleOutlined, ClockCircleOutlined, CloudSyncOutlined, ExclamationCircleOutlined, EyeOutlined, LoginOutlined, PayCircleOutlined, ShopOutlined, ShoppingCartOutlined, TableOutlined, WifiOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Card, Input, Segmented, Select, Space, Tag, Typography } from 'antd';
+import { Button, Card, Empty, Input, Segmented, Select, Space, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -8,6 +8,7 @@ import { storeBusinessApi } from '../../api/storeBusiness';
 import { storesApi } from '../../api/stores';
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { PageFilterBar } from '../../components/filters/PageFilterBar';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
@@ -27,6 +28,8 @@ const SESSION_DOT_COLOR: Record<string, string> = {
 export function StoreListPage() {
   const { t } = useI18n();
   const { user } = useAuth();
+  const { can } = usePermission();
+  const canCreateStore = can('stores', 'create');
   const navigate = useNavigate();
   const { data = [] } = useQuery({ queryKey: ['stores'], queryFn: storesApi.list });
   // Item 3: GMV/orders keyed by store id instead of a hardcoded store-name map,
@@ -39,6 +42,7 @@ export function StoreListPage() {
 
   const [keyword, setKeyword] = useState('');
   const [platformFilter, setPlatformFilter] = useState<string | undefined>();
+  const [statusFilter, setStatusFilter] = useState<'all' | 'connected' | 'needs_relogin' | 'expiring' | 'pending_login' | 'revoked'>('all');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   // GMV share is relative to the whole account, so it's computed across all stores
@@ -58,9 +62,14 @@ export function StoreListPage() {
     return data.filter((store) => {
       if (keyword && !store.name.toLowerCase().includes(keyword.toLowerCase())) return false;
       if (platformFilter && store.platform !== platformFilter) return false;
+      if (statusFilter === 'connected' && store.status !== 'connected') return false;
+      if (statusFilter === 'needs_relogin' && store.status !== 'login_required' && store.status !== 'expired') return false;
+      if (statusFilter === 'expiring' && getExpiringInDays(store) === undefined) return false;
+      if (statusFilter === 'pending_login' && store.status !== 'pending_login') return false;
+      if (statusFilter === 'revoked' && store.status !== 'revoked') return false;
       return true;
     });
-  }, [data, keyword, platformFilter]);
+  }, [data, keyword, platformFilter, statusFilter]);
 
   const columns: ColumnsType<Store> = [
     { title: t('stores.store'), dataIndex: 'name', render: (name, record) => <Link to={`/stores/${record.id}`}>{name}</Link> },
@@ -149,13 +158,19 @@ export function StoreListPage() {
         actions={
           /* D7: single primary CTA — "高级接入" removed from top level and folded
              into the onboarding wizard's "安全连接" step as a context fallback. */
-          <Button type="primary" icon={<CloudSyncOutlined />} onClick={() => navigate('/stores/onboarding?journey=import')}>
-            {t('storewizard.connectStoreCta')}
-          </Button>
+          canCreateStore ? (
+            <Button type="primary" icon={<CloudSyncOutlined />} onClick={() => navigate('/stores/onboarding?journey=import')}>
+              {t('storewizard.connectStoreCta')}
+            </Button>
+          ) : undefined
         }
       />
-      {user?.experience === 'onboarding' ? (
-        <StoreConnectionEmptyState description="你还没有连接任何店铺。完成授权后，店铺、商品、订单、评价和库存会自动同步到这里。" />
+      {user?.experience === 'onboarding' || data.length === 0 ? (
+        canCreateStore ? (
+          <StoreConnectionEmptyState description={t('stores.emptyNoStore')} />
+        ) : (
+          <Card><Empty description={t('stores.emptyNoStore')} /></Card>
+        )
       ) : (
         <>
           {/* D7: store health summary bar — shows at-a-glance counts and
@@ -186,13 +201,20 @@ export function StoreListPage() {
                   <Typography.Text strong>{data.length} {t('stores.healthTotalStores')}</Typography.Text>
                   <span style={{ color: 'var(--ark-muted)' }}>·</span>
                   <CheckCircleOutlined style={{ color: 'var(--ark-green)' }} />
-                  <Typography.Text>{online} {t('stores.healthOnline')}</Typography.Text>
+                  <Typography.Text
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setStatusFilter((prev) => (prev === 'connected' ? 'all' : 'connected'))}
+                  >
+                    {online} {t('stores.healthOnline')}
+                  </Typography.Text>
                 </Space>
                 {needsRelogin > 0 && (
                   <Button
                     type="link"
                     icon={<ExclamationCircleOutlined />}
-                    onClick={() => navigate('/inbox?type=store')}
+                    onClick={() => setStatusFilter((prev) => (prev === 'needs_relogin' ? 'all' : 'needs_relogin'))}
                     style={{ color: 'var(--ark-red)', padding: 0 }}
                   >
                     {needsRelogin} {t('stores.healthNeedsRelogin')} → {t('stores.healthGoHandle')}
@@ -204,19 +226,31 @@ export function StoreListPage() {
                   <Button
                     type="link"
                     icon={<ClockCircleOutlined />}
-                    onClick={() => navigate('/inbox?type=store')}
+                    onClick={() => setStatusFilter((prev) => (prev === 'expiring' ? 'all' : 'expiring'))}
                     style={{ color: 'var(--ark-orange)', padding: 0, fontSize: 12 }}
                   >
                     {expiringSoon} {t('stores.healthExpiringSoon')} → {t('stores.healthGoHandle')}
                   </Button>
                 )}
                 {pending > 0 && (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  <Typography.Text
+                    type="secondary"
+                    role="button"
+                    tabIndex={0}
+                    style={{ fontSize: 12, cursor: 'pointer' }}
+                    onClick={() => setStatusFilter((prev) => (prev === 'pending_login' ? 'all' : 'pending_login'))}
+                  >
                     {pending} {t('stores.healthPending')}
                   </Typography.Text>
                 )}
                 {revoked > 0 && (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  <Typography.Text
+                    type="secondary"
+                    role="button"
+                    tabIndex={0}
+                    style={{ fontSize: 12, cursor: 'pointer' }}
+                    onClick={() => setStatusFilter((prev) => (prev === 'revoked' ? 'all' : 'revoked'))}
+                  >
                     {revoked} {t('stores.healthRevoked')}
                   </Typography.Text>
                 )}
@@ -250,6 +284,19 @@ export function StoreListPage() {
                 value={platformFilter}
                 onChange={setPlatformFilter}
                 options={platformOptions}
+              />
+              <Select
+                placeholder={t('stores.allStatus')}
+                allowClear
+                value={statusFilter === 'all' ? undefined : statusFilter}
+                onChange={(value) => setStatusFilter(value ?? 'all')}
+                options={[
+                  { value: 'connected', label: t('stores.statusConnected') },
+                  { value: 'needs_relogin', label: t('stores.statusNeedsRelogin') },
+                  { value: 'expiring', label: t('stores.statusExpiring') },
+                  { value: 'pending_login', label: t('stores.statusPending') },
+                  { value: 'revoked', label: t('stores.statusRevoked') },
+                ]}
               />
             </PageFilterBar>
           </div>

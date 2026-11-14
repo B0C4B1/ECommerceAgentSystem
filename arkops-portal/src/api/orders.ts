@@ -153,6 +153,20 @@ export const ordersApi = {
     return mockDelay(result);
   },
 
+  /** Record an operator's contact attempt on the order timeline. */
+  contactBuyer: (orderId: AllMallId): Promise<Order | undefined> => {
+    const now = dayjs().toISOString();
+    const result = replaceItem(orders, (o) => o.id === orderId, (o) => ({
+      ...o,
+      timeline: [
+        ...o.timeline,
+        { title: '已通过站内信联系买家', at: now, icon: 'sync' as const },
+      ],
+    }));
+    if (result) logOrderAction(orderId, '联系买家', '通过站内信发送沟通消息');
+    return mockDelay(result);
+  },
+
   /** Apply the recommended action for an exception order (Tier 2 — one-click). */
   applyRecommendation: (orderId: AllMallId): Promise<Order | undefined> => {
     const order = orders.find((o) => o.id === orderId);

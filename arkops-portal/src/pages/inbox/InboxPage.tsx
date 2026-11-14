@@ -25,24 +25,29 @@ import {
   HistoryOutlined,
   InboxOutlined,
   LoginOutlined,
+  SettingOutlined,
   ThunderboltOutlined,
   UserAddOutlined
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Badge, Button, Card, Checkbox, List, Modal, Popconfirm, Segmented, Select, Space, Tabs, Tag, Typography, message } from 'antd';
+import { Badge, Button, Card, Checkbox, Drawer, InputNumber, List, Modal, Popconfirm, Segmented, Select, Space, Tabs, Tag, Typography, message } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { approvalPolicyApi } from '../../api/approvalPolicies';
 import { approvalsApi } from '../../api/approvals';
-import { exceptionsApi } from '../../api/exceptions';
+import { exceptionsApi, compareEscalationPriority, routeEscalation, summarizeImpact } from '../../api/exceptions';
 import type { ExceptionItem } from '../../api/exceptions';
+import { orchestratorApi } from '../../api/orchestrator';
+import { operatingModelApi } from '../../api/operatingModel';
 import { AUTO_MERGE_CONFIDENCE_THRESHOLD, fieldConflictsApi, mergeSuggestionsApi, newProductCandidatesApi, productListingsApi, productsApi } from '../../api/products';
 import { ordersApi } from '../../api/orders';
 import { storesApi } from '../../api/stores';
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
+import { useStoreScope } from '../../app/storeScope';
+import { usePermission } from '../../app/usePermission';
 import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
 import { ProductThumb } from '../../components/products/ProductThumb';
@@ -54,15 +59,18 @@ import { EXCEPTION_ORDER_STATUSES } from '../../types/domain';
 import { ApprovalDecisionModal, type ApprovalDecision } from '../approvals/ApprovalDecisionModal';
 import { InboxHistoryTab } from './InboxHistoryTab';
 import { InboxAutoHandledTab } from './InboxAutoHandledTab';
-import { ASSIGNEE_OPTIONS } from '../operations/exceptionCenterMockData';
+import { settingsApi } from '../../api/settings';
+import type { EscalationDecisionOption, EscalationTimeoutAction } from '../operations/exceptionCenterMockData';
 import {
   URGENCY_COLORS,
   formatAge,
   formatRemaining,
   getApprovalUrgency,
+  getDecisionUrgency,
   timeoutConsequenceKey
 } from './urgency';
 import type {
+  AllMallId,
   Approval,
   FieldConflict,
   InboxItemKind,
@@ -92,6 +100,8 @@ const PRODUCT_FILTER_KINDS: InboxItemKind[] = ['product_draft', 'product_new', '
  * internal kind. `filter === 'store'` matches both kinds.
  */
 const STORE_FILTER_KINDS: InboxItemKind[] = ['relogin', 'store_pending'];
+/** P30.4：「今日 Top N」一次给出最值得先处理的数量，过多就退回逐条判断。 */
+const TOP_PRIORITY_LIMIT = 5;
 
 interface InboxEntry {
   key: string;
@@ -99,6 +109,11 @@ interface InboxEntry {
   title: string;
   summary: string;
   storeName: string;
+  /**
+   * P39：这条待办归属的店铺。缺省 = 账户级（跨店方案、跨店合并等不归属单一店铺，
+   * 任何店铺范围下都要能看到，否则换个店铺范围升级项就消失）。
+   */
+  storeId?: AllMallId;
   /** 0 = most urgent */
   urgencyRank: number;
   createdAt?: string;
@@ -120,6 +135,16 @@ interface InboxEntry {
   expiresInDays?: number;
   /** Whether this entry's recommended action is safe to include in "accept all recommended". */
   batchable: boolean;
+}
+
+/**
+ * P39：一条待办在店铺范围下的归属。返回 undefined 表示账户级（跨店方案、跨店合并），
+ * 任何店铺范围下都要显示；返回数组表示「范围命中其中之一即显示」——账户级护栏合并项
+ * 覆盖多家店，只挂在第一家店的范围下会让人换个店铺就看不到这条升级。
+ */
+function entryScopeStoreIds(entry: InboxEntry): AllMallId[] | undefined {
+  if (entry.exception?.guardAccount) return entry.exception.guardAccount.storeIds;
+  return entry.storeId === undefined ? undefined : [entry.storeId];
 }
 
 /** Field-conflict labels use the short form (products.descriptionLabel), not the page subtitle (products.description). */
@@ -278,13 +303,26 @@ function toFilterBucket(value: InboxFilter): InboxFilter {
   return value;
 }
 
+/**
+ * P16：跨店方案不再在经营总览里单独拍板，而是以升级项的形式进入待办中心。
+ * 升级项 id 约定为 `cross-esc-{planId}`，这里反解出方案 id 供 orchestrator 调用。
+ */
+function crossPlanIdOf(exception: ExceptionItem): string | undefined {
+  return exception.id.startsWith('cross-esc-') ? exception.id.slice('cross-esc-'.length) : undefined;
+}
+
 export function InboxPage() {
   const { t } = useI18n();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const { can } = usePermission();
+  const { isAllStores, scope: shellScope, activeStore, setScope } = useStoreScope();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const filter: InboxFilter = isValidFilter(searchParams.get('type')) ? toFilterBucket(searchParams.get('type') as InboxFilter) : 'all';
+  // P30.4：人不必逐条读摘要再自己判断先后。默认保持原排序；
+  // 切到「今日 Top 5」即按可核对的影响金额取前 5 条，其余折叠，可一键展开。
+  const [priorityView, setPriorityView] = useState<'default' | 'top' | 'all_ranked'>('default');
   const [decisionTarget, setDecisionTarget] = useState<{ approval: Approval; decision: ApprovalDecision } | null>(null);
   // D9: 待处理 / 自动处理 / 处理记录 — "what needs me → what the system did for me → what
   // I decided". Kept in `tab` so `?type=` keeps meaning "which kind of pending item";
@@ -303,6 +341,16 @@ export function InboxPage() {
   const [selectedExceptionIds, setSelectedExceptionIds] = useState<string[]>([]);
   const [assignTarget, setAssignTarget] = useState<ExceptionItem | null>(null);
   const [assignee, setAssignee] = useState<string | undefined>();
+  // P30.5：Agent 已按金额 / 级别 / 决策口径把升级项路由到角色，
+  // 人只要在自己的队列里处理，不必从全部待办里挑「哪些归我」。
+  // P31.3：角色首屏用 ?mine=1 深链直接落到「我负责的」，队列状态可分享、可回退。
+  const mineOnly = searchParams.get('mine') === '1';
+  const setMineOnly = (next: boolean) => {
+    const params = new URLSearchParams(searchParams);
+    if (next) params.set('mine', '1');
+    else params.delete('mine');
+    setSearchParams(params, { replace: true });
+  };
   // Exception detail opened from the history tab.
   const [historyException, setHistoryException] = useState<ExceptionItem | null>(null);
   // "Accept all recommended" now confirms through a manifest rather than a bare count:
@@ -311,6 +359,12 @@ export function InboxPage() {
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchExcluded, setBatchExcluded] = useState<string[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
+  // P30.2: per-store escalation timeout policy; drafted locally so a half-edited row
+  // never changes what the sweep will do until the user saves it.
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const [policyDraft, setPolicyDraft] = useState<
+    Record<number, { timeoutHours: number; action: EscalationTimeoutAction }>
+  >({});
   // The per-item mutations each toast on success. During a batch that would stack one
   // toast per item on top of the batch summary, so they stay quiet and let the summary
   // ("N applied, M failed") speak for the whole run.
@@ -328,6 +382,18 @@ export function InboxPage() {
   // this need me?") is answered on the item itself instead.
   const { data: approvalPolicies = [] } = useQuery({ queryKey: ['approval-policies'], queryFn: approvalPolicyApi.list });
   const { data: exceptions = [] } = useQuery({ queryKey: ['exceptions'], queryFn: exceptionsApi.list });
+  // P30.5：指派对象来自在册成员（含角色），不再用一份与成员表无关的硬编码名单。
+  const { data: teamMembers = [] } = useQuery({ queryKey: ['members'], queryFn: settingsApi.members });
+  // P30.3：人沉淀的决策规则，抽屉里可查、可撤销。
+  const { data: decisionRules = [] } = useQuery({
+    queryKey: ['decisionRules'],
+    queryFn: async () => exceptionsApi.listDecisionRules(),
+  });
+  // P30.6：人工接管是按店铺维度的显式动作，抽屉里可接管 / 解除。
+  const { data: takeovers = [] } = useQuery({
+    queryKey: ['storeTakeovers'],
+    queryFn: async () => exceptionsApi.listTakeovers(),
+  });
   const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: storesApi.list });
   const { data: orders = [] } = useQuery({ queryKey: ['orders'], queryFn: ordersApi.list });
   const { data: productListings = [] } = useQuery({ queryKey: ['productListings'], queryFn: productListingsApi.list });
@@ -335,6 +401,246 @@ export function InboxPage() {
   const { data: newProductCandidates = [] } = useQuery({ queryKey: ['newProductCandidates'], queryFn: newProductCandidatesApi.list });
   const { data: mergeSuggestions = [] } = useQuery({ queryKey: ['productMergeSuggestions'], queryFn: mergeSuggestionsApi.list });
   const { data: fieldConflicts = [] } = useQuery({ queryKey: ['fieldConflicts'], queryFn: fieldConflictsApi.list });
+
+  // P16：跨店方案与单店升级项在同一个入口拍板。Dashboard 只保留预算与待拍板摘要，
+  // 决策动作全部收敛到这里，避免出现两套裁决面板。
+  const crossStoreIds = stores.map((store) => store.id);
+  const crossStoreNames = useMemo(() => {
+    const names: Record<number, string> = {};
+    stores.forEach((store) => { names[store.id] = store.name; });
+    return names;
+  }, [stores]);
+  const refreshCrossStore = () => {
+    queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    // P41.1：每次异常状态变化都会写审计轨迹，「自动处理」回执要和列表一起刷新。
+    queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+    queryClient.invalidateQueries({ queryKey: ['crossStoreArbitration'] });
+    queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+    queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    // P27: 跨店方案采纳会写归因账本，工作台复盘卡要同步。
+    queryClient.invalidateQueries({ queryKey: ['reviewOutcomes'] });
+  };
+  const acceptCrossPlanMutation = useMutation({
+    mutationFn: (planId: string) =>
+      orchestratorApi.acceptCrossStorePlan(crossStoreIds, planId, crossStoreNames, user?.name),
+    onSuccess: (result) => {
+      refreshCrossStore();
+      if (result.executionStatus === 'succeeded') itemToast(t('inbox.crossPlanAccepted'));
+      else message.warning(t('inbox.crossPlanExecFailed'));
+    },
+    onError: () => message.error(t('inbox.crossPlanFailed'))
+  });
+  const dismissCrossPlanMutation = useMutation({
+    mutationFn: (planId: string) => orchestratorApi.dismissCrossStorePlan(crossStoreIds, planId),
+    onSuccess: () => {
+      refreshCrossStore();
+      itemToast(t('inbox.crossPlanDismissed'));
+    },
+    onError: () => message.error(t('inbox.crossPlanFailed'))
+  });
+
+  // P30.1：决策请求在收件箱内直接拍板。复用经营周期的裁决入口，
+  // 选项落回提案状态；只关掉待办、不落结论的做法不在这里提供。
+  const decideEscalationMutation = useMutation({
+    mutationFn: async ({ exception, option }: { exception: ExceptionItem; option: EscalationDecisionOption }) => {
+      const ref = exception.conflictRef!;
+      const decide = () =>
+        orchestratorApi.decideConflict(
+          ref.storeId,
+          ref.conflictId,
+          option.id === 'override' ? 'override' : 'uphold',
+          'manual',
+          {
+            actor: user?.name,
+            note: `收件箱决策：${option.label}`,
+            submitAfterOverride: option.id === 'override',
+            storeName: exception.storeName,
+          },
+        );
+      try {
+        return await decide();
+      } catch (error) {
+        const messageText = (error as Error).message;
+        if (messageText !== 'cycle_not_found') throw error;
+        // 刷新后内存中的本轮方案会丢失；同店提案与冲突 id 稳定，重生成后再落结论，
+        // 避免决策请求变成点不动的死待办。
+        await orchestratorApi.generateCycle(ref.storeId, { trigger: 'manual', storeName: exception.storeName });
+        try {
+          return await decide();
+        } catch (retryError) {
+          const retryMessage = (retryError as Error).message;
+          if (retryMessage !== 'conflict_not_found' && retryMessage !== 'conflict_already_decided') throw retryError;
+          // 重生成后冲突已不存在（动作已完成或被其他结论覆盖），决策请求随之关闭。
+          await exceptionsApi.resolve(exception.id, '本轮方案已重新生成，该冲突不再存在，决策请求自动关闭');
+          return null;
+        }
+      }
+    },
+    onSuccess: (result, vars) => {
+      refreshCrossStore();
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['outcomes'] });
+      if (result === null) {
+        itemToast(t('inbox.decisionStaleClosed'));
+        return;
+      }
+      itemToast(vars.option.id === 'override' ? t('inbox.decisionOverrideToast') : t('inbox.decisionUpholdToast'));
+    },
+    onError: () => message.error(t('inbox.decisionFailed')),
+  });
+
+  // P33.1：目标节奏升级的结论直接落回目标，而不是只关掉待办。
+  // 维持 → 记下「缺口被人接受」；下调 → 按 Agent 算出的可达值改写目标并校准进度。
+  const goalRemedyMutation = useMutation({
+    mutationFn: ({ exception, option }: { exception: ExceptionItem; option: EscalationDecisionOption }) => {
+      if (!exception.storeId) throw new Error('missing_store');
+      return operatingModelApi.applyGoalPaceRemedy(
+        exception.storeId,
+        option.id === 'override' ? 'override' : 'uphold',
+        { actor: user?.name ?? '当前用户', exceptionId: exception.id },
+      );
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
+      queryClient.invalidateQueries({ queryKey: ['goalPace'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['outcomes'] });
+      itemToast(result.applied ? t('inbox.goalRemedyLowered') : t('inbox.goalRemedyKept'));
+    },
+    onError: () => message.error(t('inbox.decisionFailed')),
+  });
+
+  // P34.1：上期结算未达成的结论直接落回本月目标——
+  // 沿用不改目标，下调按上期实际（取整到千元）改写并校准进度。
+  const settlementRemedyMutation = useMutation({
+    mutationFn: ({ exception, option }: { exception: ExceptionItem; option: EscalationDecisionOption }) => {
+      if (!exception.storeId) throw new Error('missing_store');
+      return operatingModelApi.applyGoalSettlementRemedy(
+        exception.storeId,
+        option.id === 'override' ? 'override' : 'uphold',
+        { actor: user?.name ?? '当前用户', exceptionId: exception.id },
+      );
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
+      queryClient.invalidateQueries({ queryKey: ['goalPace'] });
+      queryClient.invalidateQueries({ queryKey: ['goalPeriod'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['outcomes'] });
+      itemToast(result.applied ? t('inbox.settlementRemedyLowered') : t('inbox.settlementRemedyKept'));
+    },
+    onError: () => message.error(t('inbox.decisionFailed')),
+  });
+  // P36.1：护栏体检升级的结论直接落回护栏——确认维持只留痕，调至建议值才改护栏。
+  const guardRemedyMutation = useMutation({
+    mutationFn: async ({
+      exception,
+      option,
+    }: {
+      exception: ExceptionItem;
+      option: EscalationDecisionOption;
+    }): Promise<{ applied: boolean; value?: number | null; stores?: number; skipped?: number }> => {
+      // P38.1：账户级同类护栏按名单逐店落库，与单店护栏共用同一条处理入口。
+      if (exception.type === 'guard_health_account') {
+        return orchestratorApi.applyAccountGuardRemedy(
+          exception.id,
+          option.id === 'override' ? 'override' : 'uphold',
+          { actor: user?.name ?? '当前用户', actorRole: role ?? undefined },
+        );
+      }
+      if (!exception.storeId) throw new Error('missing_store');
+      return orchestratorApi.applyGuardHealthRemedy(
+        exception.storeId,
+        exception.id,
+        option.id === 'override' ? 'override' : 'uphold',
+        { actor: user?.name ?? '当前用户', actorRole: role ?? undefined },
+      );
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['guardHealth'] });
+      queryClient.invalidateQueries({ queryKey: ['guardChanges'] });
+      queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
+      queryClient.invalidateQueries({ queryKey: ['goalPace'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+      if (result.stores !== undefined) {
+        itemToast(t('inbox.guardAccountApplied', { count: result.stores }));
+      } else {
+        itemToast(result.applied ? t('inbox.guardRemedyAdopted') : t('inbox.guardRemedyKept'));
+      }
+    },
+    onError: () => message.error(t('inbox.decisionFailed')),
+  });
+  // P30.1：到期仍无人处理的决策，由 Agent 按默认建议（维持护栏）收尾。
+  // 只做不扩大权限的默认结论；判断错了，人仍可在经营周期里改判。
+  // P30.3：先跑人沉淀的「以后都这样」规则，剩下的才轮到超时默认。
+  const sweptExpiredDecisions = useRef(false);
+  useEffect(() => {
+    if (sweptExpiredDecisions.current) return;
+    sweptExpiredDecisions.current = true;
+    const refreshDecisionState = () => {
+      refreshCrossStore();
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['outcomes'] });
+      queryClient.invalidateQueries({ queryKey: ['decisionRules'] });
+    };
+    orchestratorApi
+      .applyDecisionRules()
+      .then((ruleCount) => {
+        if (ruleCount > 0) {
+          refreshDecisionState();
+          message.info(t('inbox.ruleAutoApplied', { count: ruleCount }));
+        }
+        return orchestratorApi.applyExpiredDecisionDefaults();
+      })
+      .then((count) => {
+        if (count === 0) return;
+        refreshDecisionState();
+        message.info(t('inbox.decisionTimeoutApplied', { count }));
+      });
+  }, [queryClient, t]);
+
+  // P33.1：节奏升级由目标卡按店铺触发。打开收件箱时把缺少结论选项的旧条目按当前节奏补算一次，
+  // 避免同一类升级出现「有的能拍板、有的只能去处理」两套形态。
+  useEffect(() => {
+    let cancelled = false;
+    exceptionsApi
+      .list()
+      .then((items) => {
+        const pending = items.filter(
+          (item) =>
+            !item.resolved &&
+            !item.ignored &&
+            item.type === 'goal_pace_escalation' &&
+            item.storeId !== undefined &&
+            !item.decision,
+        );
+        if (pending.length === 0) return;
+        return Promise.all(
+          pending.map((item) => operatingModelApi.syncGoalPaceEscalation(item.storeId!)),
+        ).then((results) => {
+          if (!cancelled && results.some((result) => result.escalated)) {
+            queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+          }
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [queryClient]);
 
   const decide = useMutation({
     mutationFn: ({ approvalId, status, note }: { approvalId: number; status: ApprovalDecision; note?: string }) =>
@@ -353,6 +659,12 @@ export function InboxPage() {
       }
       queryClient.invalidateQueries({ queryKey: ['approvals'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      // P27: 收件箱里拍板同样会回写目标、周期与归因账本，别只刷待办列表。
+      queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['outcomes'] });
+      queryClient.invalidateQueries({ queryKey: ['reviewOutcomes'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
     }
   });
 
@@ -409,13 +721,79 @@ export function InboxPage() {
     }
   });
   const assignMutation = useMutation({
-    mutationFn: (input: { id: string; assignee: string }) => exceptionsApi.assign(input.id, input.assignee),
+    mutationFn: (input: { id: string; assignee: string }) => exceptionsApi.assign(input.id, input.assignee, user?.name),
     onSuccess: () => {
       message.success(t('inbox.assignSuccess'));
       setAssignTarget(null);
       setAssignee(undefined);
       queryClient.invalidateQueries({ queryKey: ['exceptions'] });
     }
+  });
+  const savePolicyMutation = useMutation({
+    mutationFn: (input: { storeId: number; timeoutHours: number; action: EscalationTimeoutAction }) =>
+      exceptionsApi.saveEscalationPolicy(input.storeId, input.timeoutHours, input.action),
+    onSuccess: (policy) => {
+      message.success(t('inbox.escalationPolicySaved'));
+      setPolicyDraft((prev) => ({
+        ...prev,
+        [policy.storeId]: { timeoutHours: policy.timeoutHours, action: policy.action },
+      }));
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+  });
+  const resumeAgentMutation = useMutation({
+    mutationFn: (input: { storeId: number; agentType: string }) =>
+      exceptionsApi.resumeAgent(input.storeId, input.agentType),
+    onSuccess: () => {
+      message.success(t('inbox.escalationResumed'));
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+  });
+  // P30.6：接管只冻结「自动执行」，不冻结提案——人仍可手动提交保留的动作。
+  const takeoverMutation = useMutation({
+    mutationFn: (input: { storeId: number; active: boolean }): Promise<unknown> =>
+      input.active
+        ? exceptionsApi.startTakeover(input.storeId)
+        : exceptionsApi.endTakeover(input.storeId),
+    onSuccess: (_, input) => {
+      message.success(t(input.active ? 'inbox.takeoverStarted' : 'inbox.takeoverEnded'));
+      queryClient.invalidateQueries({ queryKey: ['storeTakeovers'] });
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['autoTrigger'] });
+    },
+    onError: () => message.error(t('inbox.takeoverFailed')),
+  });
+  // P30.3：把「同类升级每次都这样选」沉淀成规则。依据只取人自己点过的连续结论，
+  // 建完规则立刻对本条生效——否则人还要再点一次同样的按钮。
+  const adoptRuleMutation = useMutation({
+    mutationFn: async ({ exception }: { exception: ExceptionItem }) => {
+      const storeId = exception.storeId!;
+      const kind = exception.decisionKind!;
+      const history = exceptionsApi.getDecisionHistory(storeId, kind);
+      await exceptionsApi.saveDecisionRule({
+        storeId,
+        decisionKind: kind,
+        outcome: history.outcome ?? 'uphold',
+        sourceDecisionIds: history.sourceIds,
+      });
+      return orchestratorApi.applyDecisionRules();
+    },
+    onSuccess: () => {
+      message.success(t('inbox.ruleCreated'));
+      queryClient.invalidateQueries({ queryKey: ['decisionRules'] });
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      refreshCrossStore();
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: () => message.error(t('inbox.ruleFailed')),
+  });
+  const revokeRuleMutation = useMutation({
+    mutationFn: (id: string) => exceptionsApi.revokeDecisionRule(id),
+    onSuccess: () => {
+      message.success(t('inbox.ruleRevoked'));
+      queryClient.invalidateQueries({ queryKey: ['decisionRules'] });
+    },
   });
   const applyOrderRecMutation = useMutation({
     mutationFn: (orderId: number) => ordersApi.applyRecommendation(orderId),
@@ -471,6 +849,7 @@ export function InboxPage() {
         title: approval.title,
         summary: approval.proposedAction,
         storeName: approval.storeName,
+        storeId: approval.storeId,
         urgencyRank: urgency ? (urgency.tone === 'critical' ? 0 : urgency.tone === 'warning' ? 1 : 2) : 2,
         createdAt: approval.requestedAt,
         approval
@@ -485,6 +864,7 @@ export function InboxPage() {
         title: exception.title,
         summary: exception.summary,
         storeName: exception.storeName,
+        storeId: exception.storeId,
         urgencyRank: exception.level === 'critical' ? 0 : exception.level === 'warning' ? 1 : 2,
         createdAt: exception.createdAt,
         exception
@@ -499,6 +879,7 @@ export function InboxPage() {
           title: t('inbox.reloginTitle', { store: store.name }),
           summary: t('inbox.reloginSummary'),
           storeName: store.name,
+          storeId: store.id,
           urgencyRank: 0,
           createdAt: store.lastVerifiedAt,
           store
@@ -515,6 +896,7 @@ export function InboxPage() {
           title: t('inbox.storePendingTitle', { store: store.name }),
           summary: t('inbox.storePendingSummary'),
           storeName: store.name,
+          storeId: store.id,
           urgencyRank: 2,
           createdAt: store.createdAt,
           store
@@ -535,6 +917,7 @@ export function InboxPage() {
             date: dayjs(store.authExpiresAt).format('MM-DD HH:mm')
           }),
           storeName: store.name,
+          storeId: store.id,
           urgencyRank: 2,
           createdAt: store.lastVerifiedAt,
           store,
@@ -579,6 +962,7 @@ export function InboxPage() {
               ? t('inbox.orderSlaBreachedSummary')
               : t('inbox.orderSlaSummary'),
         storeName,
+        storeId: order.storeId,
         urgencyRank,
         createdAt: order.createdAt,
         order
@@ -599,6 +983,7 @@ export function InboxPage() {
         title: product.name,
         summary: t(`inbox.productDraftSummary_${listing.status}`, { store: storeName }),
         storeName,
+        storeId: listing.storeId,
         urgencyRank: 3,
         createdAt: listing.lastSyncedAt,
         listing,
@@ -623,6 +1008,7 @@ export function InboxPage() {
           ? t('inbox.newProductSummaryCreate')
           : t('inbox.newProductSummaryDuplicate', { product: duplicateOf?.name ?? '' }),
         storeName,
+        storeId: candidate.storeId,
         urgencyRank: 2,
         createdAt: candidate.createdAt,
         newProductCandidate: candidate
@@ -638,6 +1024,7 @@ export function InboxPage() {
         kind: 'product_merge',
         title: t('inbox.mergeTitle', { a: productA.name, b: productB.name }),
         summary: t('inbox.mergeSummary', { value: suggestion.confidence }),
+        // 跨店同款合并：不归属单一店铺，任何店铺范围下都要可见。
         storeName: '',
         urgencyRank: 2,
         createdAt: suggestion.createdAt,
@@ -655,6 +1042,7 @@ export function InboxPage() {
         title: t('inbox.conflictTitle', { product: product.name }),
         summary: t('inbox.conflictSummary', { field: t(FIELD_LABEL_KEYS[conflict.field]), yours: conflict.yourValue, platform: conflict.platformValue }),
         storeName,
+        storeId: conflict.storeId,
         urgencyRank: 1,
         createdAt: conflict.createdAt,
         fieldConflict: conflict
@@ -674,27 +1062,80 @@ export function InboxPage() {
     });
   }, [approvals, exceptions, stores, productListings, products, newProductCandidates, mergeSuggestions, fieldConflicts, clock, t]);
 
+  // P39：店铺范围在待办中心显式化。选单店时只看「本店 + 账户级」，其余店铺的条数写在
+  // 范围条上并可一键回到全部——既不静默隐藏升级项，也不让人在错误店铺的上下文里拍板。
+  const entriesInScope = useMemo(() => {
+    if (isAllStores) return entries;
+    return entries.filter((entry) => {
+      const storeIds = entryScopeStoreIds(entry);
+      if (!storeIds) return true;
+      return typeof shellScope === 'number' && storeIds.includes(shellScope);
+    });
+  }, [entries, isAllStores, shellScope]);
+  const hiddenByScopeCount = entries.length - entriesInScope.length;
+  const accountLevelInScopeCount = entriesInScope.filter((entry) => !entryScopeStoreIds(entry)).length;
+
   const counts = useMemo(() => {
     const byKind: Record<InboxItemKind, number> = {
       approval: 0, exception: 0, relogin: 0, store_pending: 0, order_exception: 0, product_draft: 0, product_new: 0, product_merge: 0, product_conflict: 0
     };
-    for (const entry of entries) byKind[entry.kind] += 1;
-    return { ...byKind, all: entries.length };
-  }, [entries]);
+    for (const entry of entriesInScope) byKind[entry.kind] += 1;
+    return { ...byKind, all: entriesInScope.length };
+  }, [entriesInScope]);
 
   const visibleEntries = filter === 'all'
-    ? entries
+    ? entriesInScope
     : filter === 'product'
-      ? entries.filter((entry) => PRODUCT_FILTER_KINDS.includes(entry.kind))
+      ? entriesInScope.filter((entry) => PRODUCT_FILTER_KINDS.includes(entry.kind))
       : filter === 'store'
-        ? entries.filter((entry) => STORE_FILTER_KINDS.includes(entry.kind))
-        : entries.filter((entry) => entry.kind === filter);
+        ? entriesInScope.filter((entry) => STORE_FILTER_KINDS.includes(entry.kind))
+        : entriesInScope.filter((entry) => entry.kind === filter);
+
+  // P30.5：责任按角色归位——同名成员换岗后队列自动跟着角色走；人工改派仍优先命中。
+  const isMyQueueItem = (item?: ExceptionItem) => {
+    if (!item || !user || item.resolved || item.ignored) return false;
+    return item.assignee === user.name || item.assigneeRole === user.role;
+  };
+  const myQueueCount = entriesInScope.filter((entry) => isMyQueueItem(entry.exception)).length;
+  const scopedEntries = mineOnly ? visibleEntries.filter((entry) => isMyQueueItem(entry.exception)) : visibleEntries;
+
+  // P30.4：排序只把「有金额」的升级项提到前面；审批、重连、订单等没有金额口径的待办
+  // 保持原有顺序跟在后面，不因缺少金额被降权或丢弃。
+  const impactRankedEntries = useMemo(() => {
+    const quantified = scopedEntries
+      .filter((entry) => Boolean(entry.exception?.impact))
+      .sort((a, b) => compareEscalationPriority(a.exception!, b.exception!));
+    const rest = scopedEntries.filter((entry) => !entry.exception?.impact);
+    return [...quantified, ...rest];
+  }, [scopedEntries]);
+  const impactSummary = useMemo(
+    () =>
+      summarizeImpact(
+        scopedEntries
+          .map((entry) => entry.exception)
+          .filter((item): item is ExceptionItem => Boolean(item)),
+      ),
+    [scopedEntries],
+  );
+  const rankedMode = priorityView !== 'default';
+  const displayedEntries = priorityView === 'top'
+    ? impactRankedEntries.slice(0, TOP_PRIORITY_LIMIT)
+    : priorityView === 'all_ranked'
+      ? impactRankedEntries
+      : scopedEntries;
   // D7.3: ordered store ids for guided sequential re-login — already-expired stores
   // first (they block agents now), then the proactive expiry warnings.
   const reloginQueue = visibleEntries
     .filter((entry) => entry.kind === 'relogin' && entry.store)
     .map((entry) => entry.store!.id);
-  const batchableEntries = visibleEntries.filter((entry) => entry.batchable);
+  const canApplyBatchEntry = (entry: InboxEntry) => {
+    if (entry.kind === 'order_exception') return can('orders', 'update');
+    if (entry.kind === 'product_new' || entry.kind === 'product_merge' || entry.kind === 'product_conflict') {
+      return can('products', 'update');
+    }
+    return false;
+  };
+  const batchableEntries = scopedEntries.filter((entry) => entry.batchable && canApplyBatchEntry(entry));
   const batchAccepting = batchRunning;
 
   /** Applies one entry's recommendation. Throws so the caller can count failures. */
@@ -735,6 +1176,33 @@ export function InboxPage() {
     setBatchExcluded([]);
   };
 
+  // P30.2：升级超时策略——每个店铺可以决定“多少小时未处理 → Agent 做什么”。
+  const openPolicyDrawer = () => {
+    const draft: Record<number, { timeoutHours: number; action: EscalationTimeoutAction }> = {};
+    stores.forEach((store) => {
+      const policy = exceptionsApi.getEscalationPolicy(store.id);
+      draft[store.id] = { timeoutHours: policy.timeoutHours, action: policy.action };
+    });
+    setPolicyDraft(draft);
+    setPolicyOpen(true);
+  };
+  const escalationActionOptions = (
+    ['remind', 'degrade', 'pause_agent', 'escalate_owner'] as EscalationTimeoutAction[]
+  ).map((action) => ({ value: action, label: t(`inbox.escalationAction_${action}`) }));
+  const openDecisionCountByStore = exceptions.reduce<Record<number, number>>((acc, item) => {
+    if (item.decision && !item.resolved && !item.ignored && item.storeId) {
+      acc[item.storeId] = (acc[item.storeId] ?? 0) + 1;
+    }
+    return acc;
+  }, {});
+  const pausedAgentRows = stores.flatMap((store) =>
+    exceptionsApi.listPausedAgents(store.id).map((agent) => ({
+      ...agent,
+      storeId: store.id,
+      storeName: store.name,
+    })),
+  );
+
   if (user?.experience === 'onboarding') {
     return (
       <div className="page-stack">
@@ -749,23 +1217,27 @@ export function InboxPage() {
       const approval = entry.approval;
       return (
         <Space size={4} wrap>
-          <Button
-            size="small"
-            type="primary"
-            icon={<CheckOutlined />}
-            onClick={() => setDecisionTarget({ approval, decision: 'approved' })}
-          >
-            {t('inbox.approve')}
-          </Button>
-          <Button
-            size="small"
-            danger
-            icon={<CloseOutlined />}
-            onClick={() => setDecisionTarget({ approval, decision: 'rejected' })}
-          >
-            {t('inbox.reject')}
-          </Button>
-          <Link to={`/approvals/${approval.id}`}>
+          {can('approvals', 'approve') && (
+            <>
+              <Button
+                size="small"
+                type="primary"
+                icon={<CheckOutlined />}
+                onClick={() => setDecisionTarget({ approval, decision: 'approved' })}
+              >
+                {t('inbox.approve')}
+              </Button>
+              <Button
+                size="small"
+                danger
+                icon={<CloseOutlined />}
+                onClick={() => setDecisionTarget({ approval, decision: 'rejected' })}
+              >
+                {t('inbox.reject')}
+              </Button>
+            </>
+          )}
+          <Link to={`/agents/approvals/${approval.id}`}>
             <Button size="small" type="link" style={{ padding: '0 4px' }}>{t('inbox.viewDetail')}</Button>
           </Link>
         </Space>
@@ -773,6 +1245,106 @@ export function InboxPage() {
     }
     if (entry.kind === 'exception' && entry.exception) {
       const exception = entry.exception;
+      const crossPlanId = crossPlanIdOf(exception);
+      // P30.1：Agent 已把结论算好，人只需在收件箱里点选一个，不必跳回经营总览。
+      if (exception.decision && !exception.resolved && !exception.ignored) {
+        const decision = exception.decision;
+        const canDecide = can('exceptions', 'update');
+        // 目标节奏升级 / 上期结算 / 护栏体检都没有周期冲突可裁决，选项直接写回目标或护栏（P33.1、P34.1、P36.1）。
+        const isGoalPace = exception.type === 'goal_pace_escalation';
+        const isGoalSettlement = exception.type === 'goal_settlement';
+        const isGuardHealth =
+          exception.type === 'guard_health' || exception.type === 'guard_health_account';
+        const remedyPending = isGoalSettlement
+          ? settlementRemedyMutation.isPending
+          : isGoalPace
+            ? goalRemedyMutation.isPending
+            : guardRemedyMutation.isPending;
+        return (
+          <Space size={4} wrap style={{ justifyContent: 'flex-end' }}>
+            {decision.options.map((option) => {
+              if (option.id === 'adjust_guard') {
+                return (
+                  <Button
+                    key={option.id}
+                    size="small"
+                    title={option.consequence}
+                    onClick={() => navigate(`${exception.linkTo ?? '/dashboard'}?exc=${exception.id}`)}
+                  >
+                    {option.label}
+                  </Button>
+                );
+              }
+              return (
+                <Popconfirm
+                  key={option.id}
+                  title={option.consequence}
+                  okText={t('common.confirm')}
+                  cancelText={t('common.cancel')}
+                  onConfirm={() => {
+                    if (isGoalPace) goalRemedyMutation.mutate({ exception, option });
+                    else if (isGoalSettlement) settlementRemedyMutation.mutate({ exception, option });
+                    else if (isGuardHealth) guardRemedyMutation.mutate({ exception, option });
+                    else decideEscalationMutation.mutate({ exception, option });
+                  }}
+                >
+                  <Button
+                    size="small"
+                    type={option.recommended ? 'primary' : 'default'}
+                    title={option.consequence}
+                    disabled={!canDecide}
+                    loading={
+                      isGoalPace || isGoalSettlement || isGuardHealth
+                        ? remedyPending
+                        : decideEscalationMutation.isPending
+                    }
+                  >
+                    {option.label}
+                    {option.recommended ? ` · ${t('inbox.decisionRecommended')}` : ''}
+                  </Button>
+                </Popconfirm>
+              );
+            })}
+            <Button size="small" type="link" style={{ padding: '0 4px' }} onClick={() => setHistoryException(exception)}>
+              {t('inbox.viewDetail')}
+            </Button>
+          </Space>
+        );
+      }
+      // 跨店方案的主操作就是「采纳 / 忽略」，在这里直接完成，不再跳回经营总览；
+      // 批量选中也排除它们，避免「批量已处理」绕过方案决策。
+      if (crossPlanId) {
+        return (
+          <Space size={4} wrap>
+            {can('exceptions', 'update') && (
+              <>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<CheckOutlined />}
+                  loading={acceptCrossPlanMutation.isPending}
+                  onClick={() => acceptCrossPlanMutation.mutate(crossPlanId)}
+                >
+                  {t('inbox.crossPlanAccept')}
+                </Button>
+                <Popconfirm
+                  title={t('inbox.crossPlanDismissTitle')}
+                  okText={t('common.confirm')}
+                  cancelText={t('common.cancel')}
+                  onConfirm={() => dismissCrossPlanMutation.mutate(crossPlanId)}
+                >
+                  <Button size="small" loading={dismissCrossPlanMutation.isPending}>
+                    {t('inbox.crossPlanDismiss')}
+                  </Button>
+                </Popconfirm>
+              </>
+            )}
+            <Button size="small" type="link" style={{ padding: '0 4px' }} onClick={() => setHistoryException(exception)}>
+              {t('inbox.viewDetail')}
+            </Button>
+          </Space>
+        );
+      }
       return (
         <Space size={4} wrap>
           {exception.linkTo && (
@@ -786,13 +1358,19 @@ export function InboxPage() {
             </Button>
           )}
           {/* D9: assignment moved here from the exception centre. */}
-          <Button
-            size="small"
-            icon={<UserAddOutlined />}
-            onClick={() => { setAssignee(exception.assignee); setAssignTarget(exception); }}
-          >
-            {exception.assignee ? t('inbox.assignedTo', { name: exception.assignee }) : t('inbox.assign')}
-          </Button>
+          {can('exceptions', 'update') && (
+            <Button
+              size="small"
+              icon={<UserAddOutlined />}
+              onClick={() => {
+                // P30.5：没有负责人时预填 Agent 的路由建议，人只需确认或改派。
+                setAssignee(exception.assignee ?? routeEscalation(exception).member?.name);
+                setAssignTarget(exception);
+              }}
+            >
+              {exception.assignee ? t('inbox.assignedTo', { name: exception.assignee }) : t('inbox.assign')}
+            </Button>
+          )}
           <Button size="small" type="link" style={{ padding: '0 4px' }} onClick={() => setHistoryException(exception)}>
             {t('inbox.viewDetail')}
           </Button>
@@ -832,7 +1410,7 @@ export function InboxPage() {
         : undefined;
       return (
         <Space size={4} wrap>
-          {tier2 && (
+          {tier2 && can('orders', 'update') && (
             <Button
               size="small"
               type="primary"
@@ -856,9 +1434,9 @@ export function InboxPage() {
     }
     if (entry.kind === 'product_draft' && entry.listing) {
       const listing = entry.listing;
-      const isReviewer = user?.role === 'Owner' || user?.role === 'Admin' || user?.role === 'Approver';
-      const canSubmit = isReviewer || user?.role === 'Operator';
-      if (listing.status === 'draft' && canSubmit) {
+      const canReview = can('products', 'approve');
+      const canEditProduct = can('products', 'update');
+      if (listing.status === 'draft' && canEditProduct) {
         return (
           <Space size={4} wrap>
             <Button
@@ -880,7 +1458,7 @@ export function InboxPage() {
           </Space>
         );
       }
-      if (listing.status === 'pending_review' && isReviewer) {
+      if (listing.status === 'pending_review' && canReview) {
         return (
           <Space size={4} wrap>
             <Popconfirm
@@ -928,6 +1506,7 @@ export function InboxPage() {
       );
     }
     if (entry.kind === 'product_new' && entry.newProductCandidate) {
+      if (!can('products', 'update')) return null;
       const candidate = entry.newProductCandidate;
       return (
         <Space size={4} wrap>
@@ -952,6 +1531,7 @@ export function InboxPage() {
       );
     }
     if (entry.kind === 'product_merge' && entry.mergeSuggestion) {
+      if (!can('products', 'update')) return null;
       const suggestion = entry.mergeSuggestion;
       return (
         <Space size={4} wrap>
@@ -967,6 +1547,7 @@ export function InboxPage() {
       );
     }
     if (entry.kind === 'product_conflict' && entry.fieldConflict) {
+      if (!can('products', 'update')) return null;
       const conflict = entry.fieldConflict;
       return (
         <Space size={4} wrap>
@@ -1001,6 +1582,11 @@ export function InboxPage() {
         description={t('inbox.description')}
         actions={activeTab !== 'pending' ? undefined : (
           <Space>
+            {can('exceptions', 'update') && stores.length > 0 && (
+              <Button icon={<SettingOutlined />} onClick={openPolicyDrawer}>
+                {t('inbox.escalationPolicy')}
+              </Button>
+            )}
             {/* D7.3: guided sequential re-login — hands the whole set of stores to the
                 store detail page as an ordered queue, so finishing one store offers the
                 next instead of dropping the user back to a list. */}
@@ -1036,6 +1622,39 @@ export function InboxPage() {
             label: <span><InboxOutlined /> {t('inbox.tabPending')}{counts.all > 0 && <Badge count={counts.all} size="small" offset={[6, -4]} style={{ marginLeft: 6 }} />}</span>,
             children: (
         <Card size="small">
+          {/* P39：店铺范围条——说清「看到了什么、少了什么」，隐藏的升级项可一键找回。 */}
+          {!isAllStores && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginBottom: 12,
+                padding: '8px 10px',
+                border: '1px solid var(--ark-border-soft)',
+                borderRadius: 6,
+                background: 'var(--ark-panel-soft)'
+              }}
+            >
+              <Tag color="blue" style={{ margin: 0 }}>{t('inbox.scopeTag')}</Tag>
+              <Typography.Text style={{ fontSize: 12 }}>
+                {t('inbox.scopeBarText', {
+                  store: activeStore?.name ?? '',
+                  count: entriesInScope.length,
+                  account: accountLevelInScopeCount
+                })}
+              </Typography.Text>
+              {hiddenByScopeCount > 0 && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('inbox.scopeBarHidden', { count: hiddenByScopeCount })}
+                </Typography.Text>
+              )}
+              <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setScope('all')}>
+                {t('inbox.scopeBarShowAll')}
+              </Button>
+            </div>
+          )}
           {/* D9: bulk resolve/ignore, migrated from the exception centre. Only exception
               items are selectable — they are the only kind with batch endpoints. */}
           {selectedExceptionIds.length > 0 && (
@@ -1073,7 +1692,10 @@ export function InboxPage() {
             value={filter}
             onChange={(value) => {
               const next = value as InboxFilter;
-              setSearchParams(next === 'all' ? {} : { type: next }, { replace: true });
+              const params = new URLSearchParams(searchParams);
+              if (next === 'all') params.delete('type');
+              else params.set('type', next);
+              setSearchParams(params, { replace: true });
             }}
             options={[
               { value: 'all', label: `${t('inbox.filterAll')} (${counts.all})` },
@@ -1087,24 +1709,94 @@ export function InboxPage() {
               }
             ]}
           />
-          {visibleEntries.length === 0 ? (
+          {/* P30.4：先处理哪条由 Agent 按可核对的影响金额给出，人不用读完再自己排。 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+            <Space size={8} wrap>
+              <Segmented
+                size="small"
+                value={priorityView === 'default' ? 'default' : 'impact'}
+                onChange={(value) => setPriorityView(value === 'impact' ? 'top' : 'default')}
+                disabled={impactSummary.quantified === 0}
+                options={[
+                  { value: 'default', label: t('inbox.orderDefault') },
+                  { value: 'impact', label: t('inbox.orderImpact') }
+                ]}
+              />
+              {/* P30.5：Agent 已把升级项路由到角色，这里只回答「哪些归我」。 */}
+              <Button
+                size="small"
+                type={mineOnly ? 'primary' : 'default'}
+                onClick={() => setMineOnly(!mineOnly)}
+              >
+                {t('inbox.mineQueue', { count: myQueueCount })}
+              </Button>
+              {rankedMode && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('inbox.impactSummary', {
+                    count: impactSummary.quantified,
+                    amount: impactSummary.total.toLocaleString()
+                  })}
+                </Typography.Text>
+              )}
+            </Space>
+            {rankedMode && impactRankedEntries.length > TOP_PRIORITY_LIMIT && (
+              <Button
+                size="small"
+                type="link"
+                onClick={() => setPriorityView(priorityView === 'top' ? 'all_ranked' : 'top')}
+              >
+                {priorityView === 'top'
+                  ? t('inbox.showAllRanked', { count: impactRankedEntries.length })
+                  : t('inbox.showTopOnly', { count: TOP_PRIORITY_LIMIT })}
+              </Button>
+            )}
+          </div>
+          {displayedEntries.length === 0 ? (
             <div style={{ padding: '32px 0' }}>
-              <EmptyState description={filter === 'all' ? t('inbox.empty') : t('inbox.emptyFiltered')} />
+              <EmptyState
+                description={
+                  mineOnly && visibleEntries.length > 0
+                    ? t('inbox.emptyMine')
+                    : filter === 'all' ? t('inbox.empty') : t('inbox.emptyFiltered')
+                }
+                actionText={
+                  mineOnly && visibleEntries.length > 0
+                    ? t('inbox.mineQueueOff')
+                    : filter === 'all' ? t('inbox.goSetup') : t('inbox.clearFilter')
+                }
+                onAction={() => {
+                  if (mineOnly && visibleEntries.length > 0) setMineOnly(false);
+                  else if (filter === 'all') navigate('/setup');
+                  else setSearchParams({}, { replace: true });
+                }}
+              />
             </div>
           ) : (
             <List
               itemLayout="vertical"
-              dataSource={visibleEntries}
+              dataSource={displayedEntries}
               rowKey={(entry) => entry.key}
               renderItem={(entry) => {
                 const urgency = entry.approval ? getApprovalUrgency(entry.approval, clock) : undefined;
+                const isCrossPlan = entry.exception ? !!crossPlanIdOf(entry.exception) : false;
+                // P30.1：决策请求必须选一个结论，不能被“批量已处理”静默关掉。
+                const isDecisionRequest = entry.exception?.type === 'decision_request';
+                const batchLocked = isCrossPlan || isDecisionRequest;
                 return (
                   <List.Item style={{ padding: '12px 0' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start', justifyContent: 'space-between' }}>
                       <Checkbox
                         style={{ marginTop: 2 }}
-                        disabled={entry.kind !== 'exception'}
-                        title={entry.kind === 'exception' ? undefined : t('inbox.onlyExceptionsSelectable')}
+                        disabled={entry.kind !== 'exception' || batchLocked || !can('exceptions', 'update')}
+                        title={
+                          entry.kind !== 'exception'
+                            ? t('inbox.onlyExceptionsSelectable')
+                            : isCrossPlan
+                              ? t('inbox.crossPlanBatchHint')
+                              : isDecisionRequest
+                                ? t('inbox.decisionBatchHint')
+                                : undefined
+                        }
                         checked={!!entry.exception && selectedExceptionIds.includes(entry.exception.id)}
                         onChange={(e) => {
                           if (!entry.exception) return;
@@ -1117,6 +1809,12 @@ export function InboxPage() {
                           <Tag color={KIND_TAG_COLORS[entry.kind]} style={{ margin: 0 }}>
                             {t(`inbox.kind_${entry.kind}`)}
                           </Tag>
+                          {/* P39：账户级待办不受店铺范围约束，标出来，免得在单店范围下看着突兀。 */}
+                          {(!entry.storeId || entry.exception?.guardAccount) && (
+                            <Tag style={{ margin: 0 }} title={t('inbox.accountLevelTagTitle')}>
+                              {t('inbox.accountLevelTag')}
+                            </Tag>
+                          )}
                           {entry.approval && <StatusBadge value={entry.approval.riskLevel} />}
                         {entry.approval && (() => {
                           const policy = approvalPolicies.find((p) => p.riskLevel === entry.approval!.riskLevel);
@@ -1138,6 +1836,52 @@ export function InboxPage() {
                               {t(`exc.${entry.exception.level}`)}
                             </Tag>
                           )}
+                          {/* P30.4：金额和来源都摆在标签上，排序依据不必点开才知道。 */}
+                          {entry.exception?.impact && (
+                            <Tag color="cyan" style={{ margin: 0 }} title={entry.exception.impact.basis}>
+                              {t(`inbox.impactKind_${entry.exception.impact.kind}`, {
+                                amount: entry.exception.impact.amount.toLocaleString()
+                              })}
+                            </Tag>
+                          )}
+                          {rankedMode && entry.exception && !entry.exception.impact && (
+                            <Tag style={{ margin: 0 }}>{t('inbox.impactUnknown')}</Tag>
+                          )}
+                          {/* P30.5：谁负责、为什么是他，都摆在行上；绿色表示 Agent 路由，灰色表示人工改派。 */}
+                          {entry.exception?.assignee && (
+                            <Tag
+                              color={entry.exception.assignedBy?.startsWith('Agent') ? 'green' : 'default'}
+                              style={{ margin: 0 }}
+                              title={entry.exception.assignmentReason}
+                            >
+                              {entry.exception.assigneeRole
+                                ? t('inbox.assignedTag', {
+                                    name: entry.exception.assignee,
+                                    role: t(`member.role.${entry.exception.assigneeRole}`)
+                                  })
+                                : t('inbox.assignedNameOnly', { name: entry.exception.assignee })}
+                            </Tag>
+                          )}
+                          {entry.exception?.type === 'cycle_escalation' && (
+                            <Tag color="purple" style={{ margin: 0 }}>
+                              {t('exc.type_cycle_escalation')}
+                            </Tag>
+                          )}
+                          {entry.exception?.type === 'cross_store_escalation' && (
+                            <Tag color="geekblue" style={{ margin: 0 }}>
+                              {t('exc.type_cross_store_escalation')}
+                            </Tag>
+                          )}
+                          {entry.exception?.type === 'goal_pace_escalation' && (
+                            <Tag color="magenta" style={{ margin: 0 }}>
+                              {t('exc.type_goal_pace_escalation')}
+                            </Tag>
+                          )}
+                          {entry.exception?.type === 'decision_request' && (
+                            <Tag color="gold" style={{ margin: 0 }}>
+                              {t('exc.type_decision_request')}
+                            </Tag>
+                          )}
                           {entry.kind === 'relogin' && (
                             entry.expiresInDays === undefined
                               ? <AlertOutlined style={{ color: 'var(--ark-red)' }} />
@@ -1150,7 +1894,7 @@ export function InboxPage() {
                           )}
                           <div style={{ flex: 1, minWidth: 0 }}>
                           {entry.kind === 'approval' && entry.approval ? (
-                            <Link to={`/approvals/${entry.approval.id}`}>
+                            <Link to={`/agents/approvals/${entry.approval.id}`}>
                               <Typography.Text strong>{entry.title}</Typography.Text>
                             </Link>
                           ) : (
@@ -1168,6 +1912,81 @@ export function InboxPage() {
                             {entry.summary}
                           </Typography.Paragraph>
                         )}
+                        {entry.exception?.decision && !entry.exception.resolved && (() => {
+                          const decision = entry.exception!.decision!;
+                          const exception = entry.exception!;
+                          const policy = exceptionsApi.getEscalationPolicy(exception.storeId ?? -1);
+                          const overdue = dayjs(decision.deadline).isBefore(clock);
+                          const defaultLabel =
+                            decision.options.find((option) => option.id === decision.timeoutOptionId)?.label ?? '';
+                          const actionLabel = t(`inbox.escalationAction_${policy.action}`);
+                          return (
+                            <>
+                              <Typography.Text type={overdue ? 'danger' : 'secondary'} style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>
+                                {policy.action === 'degrade'
+                                  ? overdue
+                                    ? t('inbox.decisionOverdue', { option: defaultLabel })
+                                    : t('inbox.decisionDeadline', { hours: decision.timeoutHours, option: defaultLabel })
+                                  : overdue
+                                    ? t('inbox.decisionOverdueAction', { action: actionLabel })
+                                    : t('inbox.decisionDeadlineAction', { hours: decision.timeoutHours, action: actionLabel })}
+                              </Typography.Text>
+                              <Space size={4} wrap style={{ marginBottom: 2 }}>
+                                {(exception.reminderCount ?? 0) > 0 && (
+                                  <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+                                    {t('inbox.decisionReminded', { count: exception.reminderCount ?? 0 })}
+                                  </Tag>
+                                )}
+                                {exception.escalatedToOwnerAt && (
+                                  <Tag color="red" style={{ marginInlineEnd: 0 }}>
+                                    {t('inbox.decisionEscalatedOwner')}
+                                  </Tag>
+                                )}
+                                {exception.agentPausedAt && (
+                                  <Tag color="volcano" style={{ marginInlineEnd: 0 }}>
+                                    {t('inbox.decisionAgentPaused')}
+                                  </Tag>
+                                )}
+                              </Space>
+                              {exception.storeId && exception.decisionKind && (() => {
+                                // P30.3：同类升级连续两次由人给出同一结论 → 提议沉淀成规则。
+                                const history = exceptionsApi.getDecisionHistory(
+                                  exception.storeId,
+                                  exception.decisionKind,
+                                );
+                                if (history.streak < 2 || !history.outcome) return null;
+                                const outcomeLabel = t(
+                                  history.outcome === 'override'
+                                    ? 'inbox.ruleOutcome_override'
+                                    : 'inbox.ruleOutcome_uphold',
+                                );
+                                const kindLabel = t(`inbox.ruleKind_${exception.decisionKind}`);
+                                return (
+                                  <Space size={4} wrap style={{ marginBottom: 2 }}>
+                                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                                      {t('inbox.ruleSuggestion', {
+                                        count: history.streak,
+                                        kind: kindLabel,
+                                        outcome: outcomeLabel,
+                                      })}
+                                    </Typography.Text>
+                                    <Popconfirm
+                                      title={t('inbox.ruleConfirmTitle')}
+                                      description={t('inbox.ruleConfirm', { kind: kindLabel, outcome: outcomeLabel })}
+                                      okText={t('inbox.ruleAdopt')}
+                                      cancelText={t('common.cancel')}
+                                      onConfirm={() => adoptRuleMutation.mutate({ exception })}
+                                    >
+                                      <Button size="small" type="link" style={{ padding: 0, height: 'auto', fontSize: 11 }}>
+                                        {t('inbox.ruleAdopt')}
+                                      </Button>
+                                    </Popconfirm>
+                                  </Space>
+                                );
+                              })()}
+                            </>
+                          );
+                        })()}
                         <Typography.Text type="secondary" style={{ fontSize: 11 }}>
                           {entry.storeName}
                           {entry.kind === 'product_draft' && entry.listing ? ` · ¥${entry.listing.sellingPrice.toFixed(2)}` : ''}
@@ -1178,6 +1997,20 @@ export function InboxPage() {
                       </div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                        {entry.exception?.decision && (() => {
+                          // P40.1：把「还不处理，Agent 什么时候替我收尾」直接写在卡片上；
+                          // 截止时间锚定首次登记，不再被每轮巡检刷新。
+                          const due = getDecisionUrgency(entry.exception!.decision!, clock);
+                          return (
+                            <Typography.Text
+                              strong
+                              style={{ fontSize: 12, color: URGENCY_COLORS[due.tone] }}
+                              title={`${t('approvalDetail.expiresAtLabel')}: ${due.deadline.format('MM-DD HH:mm')}`}
+                            >
+                              {due.remainingMs <= 0 ? t('inbox.pastDue') : formatRemaining(t, due.remainingMs)}
+                            </Typography.Text>
+                          );
+                        })()}
                         {urgency && (
                           <Typography.Text
                             strong
@@ -1208,7 +2041,7 @@ export function InboxPage() {
             // did for me → what I decided.
             key: 'auto',
             label: <span><ThunderboltOutlined /> {t('inbox.tabAuto')}</span>,
-            children: <InboxAutoHandledTab onShowPending={() => setActiveTab('pending')} />,
+            children: <InboxAutoHandledTab onShowPending={() => setActiveTab('pending')} onCheckEscalation={setHistoryException} />,
           },
           {
             key: 'history',
@@ -1305,15 +2138,43 @@ export function InboxPage() {
         cancelText={t('common.cancel')}
         okButtonProps={{ disabled: !assignee, loading: assignMutation.isPending }}
         onOk={() => assignTarget && assignee && assignMutation.mutate({ id: assignTarget.id, assignee })}
-        width={420}
+        width={460}
       >
         <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>{assignTarget?.title}</Typography.Paragraph>
+        {/* P30.5：Agent 的路由结论、角色和依据先摆出来，人改派前知道自己覆盖了什么。 */}
+        {assignTarget && (() => {
+          const route = routeEscalation(assignTarget);
+          return (
+            <Typography.Paragraph style={{ fontSize: 12 }}>
+              {t('inbox.routeSuggestion', {
+                name: route.member?.name ?? t('inbox.routeNoMember'),
+                role: t(`member.role.${route.role}`),
+                reason: route.reason,
+              })}
+              {route.member && assignee !== route.member.name && (
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: '0 4px' }}
+                  onClick={() => setAssignee(route.member!.name)}
+                >
+                  {t('inbox.routeAdopt')}
+                </Button>
+              )}
+            </Typography.Paragraph>
+          );
+        })()}
         <Select
           style={{ width: '100%' }}
           placeholder={t('inbox.assignTitle')}
           value={assignee}
           onChange={setAssignee}
-          options={ASSIGNEE_OPTIONS.map((name) => ({ value: name, label: name }))}
+          options={teamMembers.map((member) => ({
+            value: member.name,
+            label: `${member.name} · ${t(`member.role.${member.role}`)}${
+              member.status === 'invited' ? ` · ${t('inbox.memberInvited')}` : ''
+            }`,
+          }))}
         />
       </Modal>
 
@@ -1364,9 +2225,244 @@ export function InboxPage() {
                 {t('inbox.assignedTo', { name: historyException.assignee })}
               </Typography.Text>
             )}
+            {/* P41.1：从「自动处理」核对进来时，要能直接看到谁在什么时候收尾、结论是什么。 */}
+            {historyException.resolvedBy && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('inbox.receiptResolvedBy', {
+                  actor: historyException.resolvedBy,
+                  time: historyException.resolvedAt ? dayjs(historyException.resolvedAt).format('MM-DD HH:mm') : '—',
+                })}
+              </Typography.Text>
+            )}
+            {historyException.resolutionNote && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('inbox.receiptNote', { note: historyException.resolutionNote })}
+              </Typography.Text>
+            )}
           </Space>
         )}
       </Modal>
+
+      {/* P30.2：按店铺配置“超时未处理 → Agent 做什么”，并给被暂停的 Agent 一个恢复出口。 */}
+      <Drawer
+        title={t('inbox.escalationPolicyTitle')}
+        open={policyOpen}
+        onClose={() => setPolicyOpen(false)}
+        width={520}
+      >
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">{t('inbox.escalationPolicyHint')}</Typography.Text>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {stores.map((store) => {
+              const policy = exceptionsApi.getEscalationPolicy(store.id);
+              const draft = policyDraft[store.id] ?? {
+                timeoutHours: policy.timeoutHours,
+                action: policy.action,
+              };
+              const dirty =
+                draft.timeoutHours !== policy.timeoutHours || draft.action !== policy.action;
+              const saving =
+                savePolicyMutation.isPending &&
+                savePolicyMutation.variables?.storeId === store.id;
+              const takeover = takeovers.find((entry) => entry.storeId === store.id);
+              const takeoverSaving =
+                takeoverMutation.isPending &&
+                takeoverMutation.variables?.storeId === store.id;
+              return (
+                <Card key={store.id} size="small">
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Space size={8} wrap>
+                      <Typography.Text strong>{store.name}</Typography.Text>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {t('inbox.escalationStoreDecisions', {
+                          count: openDecisionCountByStore[store.id] ?? 0,
+                        })}
+                      </Typography.Text>
+                    </Space>
+                    <Space size={8} wrap>
+                      <InputNumber
+                        min={1}
+                        max={168}
+                        value={draft.timeoutHours}
+                        addonAfter={t('inbox.escalationHours')}
+                        style={{ width: 140 }}
+                        onChange={(value) =>
+                          setPolicyDraft((prev) => ({
+                            ...prev,
+                            [store.id]: {
+                              ...draft,
+                              timeoutHours: Number(value ?? policy.timeoutHours),
+                            },
+                          }))
+                        }
+                      />
+                      <Select
+                        value={draft.action}
+                        options={escalationActionOptions}
+                        style={{ width: 210 }}
+                        onChange={(action: EscalationTimeoutAction) =>
+                          setPolicyDraft((prev) => ({
+                            ...prev,
+                            [store.id]: { ...draft, action },
+                          }))
+                        }
+                      />
+                      <Button
+                        size="small"
+                        type="primary"
+                        disabled={!dirty}
+                        loading={saving}
+                        onClick={() =>
+                          savePolicyMutation.mutate({
+                            storeId: store.id,
+                            timeoutHours: draft.timeoutHours,
+                            action: draft.action,
+                          })
+                        }
+                      >
+                        {t('inbox.escalationSave')}
+                      </Button>
+                    </Space>
+                    <div
+                      style={{
+                        borderTop: '1px dashed var(--ark-border-soft, #eef2f7)',
+                        paddingTop: 8,
+                      }}
+                    >
+                      <Space size={8} wrap>
+                        <Typography.Text style={{ fontSize: 12 }}>
+                          {t('inbox.takeoverLabel')}
+                        </Typography.Text>
+                        {takeover ? (
+                          <>
+                            <Tag color="orange">
+                              {t('inbox.takeoverActiveTag', { actor: takeover.actor })}
+                            </Tag>
+                            <Button
+                              size="small"
+                              loading={takeoverSaving}
+                              onClick={() =>
+                                takeoverMutation.mutate({ storeId: store.id, active: false })
+                              }
+                            >
+                              {t('inbox.takeoverRelease')}
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            size="small"
+                            loading={takeoverSaving}
+                            onClick={() =>
+                              takeoverMutation.mutate({ storeId: store.id, active: true })
+                            }
+                          >
+                            {t('inbox.takeoverStart')}
+                          </Button>
+                        )}
+                      </Space>
+                      <Typography.Text
+                        type="secondary"
+                        style={{ display: 'block', fontSize: 12, marginTop: 4 }}
+                      >
+                        {takeover
+                          ? t('inbox.takeoverActiveHint', {
+                              time: dayjs(takeover.startedAt).format('MM-DD HH:mm'),
+                            })
+                          : t('inbox.takeoverIdleHint')}
+                      </Typography.Text>
+                    </div>
+                  </Space>
+                </Card>
+              );
+            })}
+          </Space>
+          <div>
+            <Typography.Text strong>{t('inbox.escalationPausedTitle')}</Typography.Text>
+            {pausedAgentRows.length === 0 ? (
+              <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                {t('inbox.escalationNoPaused')}
+              </Typography.Paragraph>
+            ) : (
+              <List
+                size="small"
+                style={{ marginTop: 8 }}
+                dataSource={pausedAgentRows}
+                renderItem={(agent) => (
+                  <List.Item
+                    actions={[
+                      <Button
+                        key="resume"
+                        size="small"
+                        onClick={() =>
+                          resumeAgentMutation.mutate({
+                            storeId: agent.storeId,
+                            agentType: agent.agentType,
+                          })
+                        }
+                      >
+                        {t('inbox.escalationResume')}
+                      </Button>,
+                    ]}
+                  >
+                    <Space direction="vertical" size={0}>
+                      <Typography.Text>
+                        {agent.storeName} · {t(`agent.${agent.agentType}`)}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {t('inbox.decisionAgentPaused')} · {dayjs(agent.pausedAt).format('MM-DD HH:mm')}
+                      </Typography.Text>
+                    </Space>
+                  </List.Item>
+                )}
+              />
+            )}
+          </div>
+          <div>
+            <Typography.Text strong>{t('inbox.decisionRulesTitle')}</Typography.Text>
+            {decisionRules.length === 0 ? (
+              <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                {t('inbox.decisionRulesEmpty')}
+              </Typography.Paragraph>
+            ) : (
+              <List
+                size="small"
+                style={{ marginTop: 8 }}
+                dataSource={decisionRules}
+                renderItem={(rule) => (
+                  <List.Item
+                    actions={[
+                      <Popconfirm
+                        key="revoke"
+                        title={t('inbox.ruleRevokeConfirm')}
+                        okText={t('inbox.ruleRevoke')}
+                        cancelText={t('common.cancel')}
+                        onConfirm={() => revokeRuleMutation.mutate(rule.id)}
+                      >
+                        <Button size="small" danger>
+                          {t('inbox.ruleRevoke')}
+                        </Button>
+                      </Popconfirm>,
+                    ]}
+                  >
+                    <Space direction="vertical" size={0}>
+                      <Typography.Text>
+                        {stores.find((store) => store.id === rule.storeId)?.name ?? `#${rule.storeId}`} ·{' '}
+                        {t(`inbox.ruleKind_${rule.decisionKind}`)} ·{' '}
+                        {t(rule.outcome === 'override' ? 'inbox.ruleOutcome_override' : 'inbox.ruleOutcome_uphold')}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {t('inbox.ruleAppliedCount', { count: rule.appliedCount })} ·{' '}
+                        {t('inbox.ruleSourceCount', { count: rule.sourceDecisionIds.length })} ·{' '}
+                        {dayjs(rule.createdAt).format('MM-DD HH:mm')}
+                      </Typography.Text>
+                    </Space>
+                  </List.Item>
+                )}
+              />
+            )}
+          </div>
+        </Space>
+      </Drawer>
     </div>
   );
 }

@@ -244,7 +244,7 @@ export function BillingSection() {
     { title: t('finance.amount'), dataIndex: 'amount', render: (v: number) => formatCurrency(v), align: 'right' },
     { title: t('finance.status'), dataIndex: 'status', render: (s: BillingRecord['status']) => <Tag color={statusColors[s]}>{t(`finance.status_${s}`)}</Tag>, width: 100 },
     { title: t('finance.dueDate'), dataIndex: 'dueDate', width: 110 },
-    { title: t('finance.invoice'), dataIndex: 'invoiceUrl', render: (url: string | undefined) => url ? <Button size="small" icon={<DownloadOutlined />}>{t('finance.download')}</Button> : '-', width: 100 }
+    { title: t('finance.invoice'), dataIndex: 'invoiceUrl', render: (url: string | undefined) => (!url ? '-' : url === '#' ? <Tag>{t('finance.invoiceIssued')}</Tag> : <Button size="small" icon={<DownloadOutlined />}>{t('finance.download')}</Button>), width: 100 }
   ];
 
   return (

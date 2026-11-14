@@ -1,7 +1,6 @@
 import { GiftOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Badge, Button, Card, DatePicker, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { useState } from 'react';
-import dayjs from 'dayjs';
 import { useI18n } from '../../../app/i18n';
 
 const mockPromotions = [
@@ -118,9 +117,6 @@ export function PromotionManagerCard() {
       width: 120,
       render: (_: unknown, r: typeof promotions[0]) => (
         <Space size="small">
-          <Button size="small" type="link" style={{ fontSize: 12, padding: 0 }} onClick={() => message.info(t('promo.viewed'))}>
-            {t('promo.view')}
-          </Button>
           {r.status === 'active' && (
             <Button size="small" type="link" danger style={{ fontSize: 12, padding: 0 }} onClick={() => handleStop(r.id)}>
               {t('promo.stop')}

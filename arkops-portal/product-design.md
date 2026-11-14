@@ -875,7 +875,7 @@ Agent 中心 (Agents)
 
 ## 五、UX 改进决策记录（Phase 0，2026-07-22）
 
-依据 `UX-REVIEW.md` / `UX-IMPROVEMENT-PLAN.md`，以下产品决策已确认，作为各工作流（WS-A…WS-F）的实现依据：
+以下产品决策已确认，作为各工作流（WS-A…WS-F）的实现依据：
 
 ### D1 — 场景优先配置模型（已确认）
 

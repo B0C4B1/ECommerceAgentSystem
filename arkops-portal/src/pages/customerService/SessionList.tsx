@@ -22,6 +22,8 @@ interface Props {
   onStatusFilterChange: (status: SessionStatus | undefined) => void;
   onStoreFilterChange: (storeId: AllMallId | undefined) => void;
   onSearchChange: (search: string) => void;
+  /** When the shell scope is a single store, the per-console store filter is redundant. */
+  lockStoreFilter?: boolean;
 }
 
 const STATUS_OPTIONS: { value: SessionStatus | 'all'; labelKey: string }[] = [
@@ -34,6 +36,7 @@ const STATUS_OPTIONS: { value: SessionStatus | 'all'; labelKey: string }[] = [
 export function SessionList({
   sessions, stores, selectedId, statusFilter, storeFilter, search,
   onSelect, onStatusFilterChange, onStoreFilterChange, onSearchChange,
+  lockStoreFilter = false,
 }: Props) {
   const { t } = useI18n();
 
@@ -69,6 +72,7 @@ export function SessionList({
             value={storeFilter}
             onChange={onStoreFilterChange}
             allowClear
+            disabled={lockStoreFilter}
             placeholder={t('cs.filterByStore')}
             style={{ width: 110 }}
             options={stores.map((s) => ({ value: s.id, label: s.name }))}

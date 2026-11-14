@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
-import { Alert, Button, Col, Form, Input, InputNumber, Modal, Progress, Radio, Row, Select, Space, Statistic, Tabs, Tag, Typography, message } from 'antd';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Alert, Button, Col, Form, Input, InputNumber, Modal, Progress, Radio, Row, Select, Space, Spin, Statistic, Tabs, Tag, Typography, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { mergeSuggestionsApi, productListingsApi, productsApi } from '../../api/products';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { DescriptionPanel } from '../../components/detail/DescriptionPanel';
 import { DetailSection } from '../../components/detail/DetailSection';
+import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
 import { ListingMatrix } from '../../components/products/ListingMatrix';
 import { parseAllMallId } from '../../utils/id';
@@ -18,11 +20,14 @@ import { ProvenanceTag } from './ProductManagementPage';
 
 export function ProductDetailPage() {
   const { t } = useI18n();
+  const { can } = usePermission();
+  const canUpdateProduct = can('products', 'update');
   const { productId } = useParams();
   const parsedId = parseAllMallId(productId);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data: product } = useQuery({ queryKey: ['product', parsedId], queryFn: () => productsApi.get(parsedId!), enabled: parsedId !== undefined });
+  const { data: product, isLoading: productLoading } = useQuery({ queryKey: ['product', parsedId], queryFn: () => productsApi.get(parsedId!), enabled: parsedId !== undefined });
   const { data: allListings = [] } = useQuery({ queryKey: ['productListings'], queryFn: productListingsApi.list });
   const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: storesApi.list });
   const { data: mergeSuggestions = [] } = useQuery({ queryKey: ['productMergeSuggestions'], queryFn: mergeSuggestionsApi.list });
@@ -65,10 +70,30 @@ export function ProductDetailPage() {
     onSuccess: () => { invalidateListings(); message.success(t('listing.updated')); setEditingListing(null); listingForm.resetFields(); }
   });
 
-  if (!product) {
+  if (productLoading) {
     return (
       <div className="page-stack">
         <PageHeader title={t('products.detailTitle')} breadcrumb={[{ title: t('products.title'), href: '/products' }]} />
+        <div style={{ display: 'grid', placeItems: 'center', minHeight: 240 }}>
+          <Spin size="large" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!product) {
+    return (
+      <div className="page-stack">
+        <PageHeader
+          title={t('products.detailTitle')}
+          breadcrumb={[{ title: t('products.title'), href: '/products' }]}
+          onBack={() => navigate(-1)}
+        />
+        <EmptyState
+          description={t('products.notFoundDesc')}
+          actionText={t('products.backToList')}
+          onAction={() => navigate('/products')}
+        />
       </div>
     );
   }
@@ -118,15 +143,17 @@ export function ProductDetailPage() {
           showIcon
           message={t('products.zeroListingTitle')}
           description={t('products.zeroListingDesc')}
-          action={<Button type="primary" icon={<PlusOutlined />} onClick={() => setListToStoreTarget({})}>{t('products.listToStore')}</Button>}
+          action={canUpdateProduct ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setListToStoreTarget({})}>{t('products.listToStore')}</Button> : undefined}
           style={{ marginBottom: 16 }}
         />
       )}
-      <div style={{ marginBottom: 12, textAlign: 'right' }}>
-        <Button size="small" type="primary" icon={<PlusOutlined />} disabled={availableStores.length === 0} onClick={() => setListToStoreTarget({})}>
-          {t('products.listToStore')}
-        </Button>
-      </div>
+      {canUpdateProduct && (
+        <div style={{ marginBottom: 12, textAlign: 'right' }}>
+          <Button size="small" type="primary" icon={<PlusOutlined />} disabled={availableStores.length === 0} onClick={() => setListToStoreTarget({})}>
+            {t('products.listToStore')}
+          </Button>
+        </div>
+      )}
       <ListingMatrix
         product={product}
         stores={stores}
@@ -136,6 +163,7 @@ export function ProductDetailPage() {
         onSubmitForReview={(id) => submitForReviewMutation.mutate(id)}
         onPublish={(id) => publishMutation.mutate(id)}
         onDelist={(id) => delistMutation.mutate(id)}
+        readOnly={!canUpdateProduct}
       />
     </>
   );
@@ -145,6 +173,7 @@ export function ProductDetailPage() {
       <Form
         form={infoForm}
         layout="vertical"
+        disabled={!canUpdateProduct}
         initialValues={{ name: product.name, category: product.category, cost: product.cost, description: product.description, totalStock: product.totalStock }}
       >
         <Row gutter={16}>
@@ -174,9 +203,11 @@ export function ProductDetailPage() {
             </Form.Item>
           </Col>
         </Row>
-        <Space>
-          <Button type="primary" loading={updateProductMutation.isPending} onClick={handleInfoSave}>{t('common.save')}</Button>
-        </Space>
+        {canUpdateProduct && (
+          <Space>
+            <Button type="primary" loading={updateProductMutation.isPending} onClick={handleInfoSave}>{t('common.save')}</Button>
+          </Space>
+        )}
       </Form>
       <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--ark-border-soft)' }}>
         <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>{t('products.primaryStore')}</Typography.Text>
@@ -184,6 +215,7 @@ export function ProductDetailPage() {
           style={{ width: 240 }}
           value={product.primaryStoreId}
           loading={setPrimaryStoreMutation.isPending}
+          disabled={!canUpdateProduct}
           onChange={(v) => setPrimaryStoreMutation.mutate(v)}
           options={stores.map((s) => ({ value: s.id, label: s.name }))}
         />
@@ -211,7 +243,9 @@ export function ProductDetailPage() {
               <Typography.Text>{t('listing.available')}: {listingAvailableStock(product, listing)}</Typography.Text>
               {listing.inventoryMode === 'independent' && <Typography.Text type="secondary">({t('listing.allocation')} {listing.allocation})</Typography.Text>}
               {listing.inventoryMode === 'shared' && <Typography.Text type="secondary">({t('products.safetyStockLabel')} {listing.safetyStock})</Typography.Text>}
-              <Button size="small" type="link" onClick={() => openEditListing(listing)} style={{ padding: 0 }}>{t('common.edit')}</Button>
+              {canUpdateProduct && (
+                <Button size="small" type="link" onClick={() => openEditListing(listing)} style={{ padding: 0 }}>{t('common.edit')}</Button>
+              )}
             </Space>
           ),
         }))}

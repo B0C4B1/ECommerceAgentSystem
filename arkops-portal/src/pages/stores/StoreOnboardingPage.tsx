@@ -44,6 +44,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { agentsApi } from '../../api/agents';
 import { approvalsApi } from '../../api/approvals';
+import { operatingModelApi } from '../../api/operatingModel';
 import { generateGatewaySessionId } from '../../api/kioskGateway';
 import { storesApi } from '../../api/stores';
 import { useAuth } from '../../app/auth';
@@ -522,10 +523,13 @@ export function StoreOnboardingPage() {
         services: [],
       });
       await storesApi.updateStatus(created.id, 'connected');
+      // S1: 新店目标进度从 0 起算，避免首屏出现“没有交易但目标已完成 62%”。
+      await operatingModelApi.createInitialGoal(created.id);
       if (cancelled) return;
       setStoreCreated({ id: created.id, name: created.name, platform: created.platform });
       updateExperience('established');
       queryClient.invalidateQueries({ queryKey: ['stores'] });
+      queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
       message.success(t('storewizard.storeCreatedToast', { name: created.name }));
     })();
     return () => { cancelled = true; };
@@ -651,7 +655,7 @@ export function StoreOnboardingPage() {
         goal: '扫描最近同步的商品评价，为超过 24 小时未回复的差评生成回复草稿。',
         storeId: storeCreated.id,
       });
-      const approval = await approvalsApi.create({
+      const result = await approvalsApi.create({
         taskId: task.id,
         storeId: storeCreated.id,
         storeName: storeCreated.name,
@@ -662,9 +666,16 @@ export function StoreOnboardingPage() {
         beforeValue: `${FIRST_AGENT_REVIEW_COUNT} 条差评未回复`,
         afterValue: `${FIRST_AGENT_REVIEW_COUNT} 条差评已回复（草稿见任务详情）`,
         riskLevel: 'low',
+        // S1: 首个审批挂上目标效果，批准后目标卡会真正变化，而不是只弹一个 toast。
+        goalEffect: {
+          action: 'reply_reviews',
+          targetLabel: `${FIRST_AGENT_REVIEW_COUNT} 条差评回复`,
+          metric: 'gmv',
+          expectedImpact: 600,
+        },
       });
       queryClient.invalidateQueries({ queryKey: ['approvals'] });
-      setFirstApprovalId(approval.id);
+      if (result.approval) setFirstApprovalId(result.approval.id);
       setAgentMoment('done');
     }, 1600);
   };

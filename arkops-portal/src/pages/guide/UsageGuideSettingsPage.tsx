@@ -89,7 +89,7 @@ export function UsageGuideSettingsPage() {
             },
             {
               title: <Typography.Text strong>{t('guide.step4Title')}</Typography.Text>,
-              description: <>{t('guide.step4Desc')} <Link to="/agents/approvals">{t('guidev2.goApprovals')} →</Link></>,
+              description: <>{t('guide.step4Desc')} <Link to="/inbox?type=approval">{t('guidev2.goApprovals')} →</Link></>,
             }
           ]}
         />
@@ -282,7 +282,7 @@ export function UsageGuideSettingsPage() {
       <Card
         id={GUIDE_ANCHORS.tagLegend}
         title={<><SafetyOutlined style={{ marginRight: 8 }} />{t('guidev2.legendTitle')}</>}
-        extra={<Link to="/agents/exceptions">{t('guidev2.goExceptions')} →</Link>}
+        extra={<Link to="/inbox?type=exception">{t('guidev2.goExceptions')} →</Link>}
         style={{ marginBottom: 24 }}
       >
         <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 16 }}>
@@ -355,7 +355,7 @@ export function UsageGuideSettingsPage() {
         </Typography.Paragraph>
         <Typography.Paragraph style={{ marginBottom: 12 }}>
           <Typography.Text strong><CheckCircleOutlined style={{ color: '#ea580c', marginRight: 4 }} />{t('guide.conceptApproval')}：</Typography.Text>
-          {t('guide.conceptApprovalDesc')} <Link to="/agents/approvals">{t('guidev2.goApprovals')} →</Link>
+          {t('guide.conceptApprovalDesc')} <Link to="/inbox?type=approval">{t('guidev2.goApprovals')} →</Link>
         </Typography.Paragraph>
         <Typography.Paragraph style={{ marginBottom: 0 }}>
           <Typography.Text strong><RobotOutlined style={{ color: '#7c3aed', marginRight: 4 }} />{t('guide.conceptLivePromo')}：</Typography.Text>

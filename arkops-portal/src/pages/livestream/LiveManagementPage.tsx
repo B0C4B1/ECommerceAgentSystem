@@ -14,6 +14,7 @@ import dayjs from 'dayjs';
 import { livestreamApi } from '../../api/livestream';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { useStoreScope } from '../../app/storeScope';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import type { ContentMaterial, LiveScript, LiveSession } from '../../types/domain';
@@ -32,6 +33,7 @@ function formatDuration(minutes: number): string {
 
 export function LiveManagementPage() {
   const { t } = useI18n();
+  const { scope, isAllStores } = useStoreScope();
   const [scriptModal, setScriptModal] = useState<LiveSession | null>(null);
 
   const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: storesApi.list });
@@ -41,9 +43,11 @@ export function LiveManagementPage() {
   if (stores.length === 0) return <StoreConnectionEmptyState description={t('live.emptyNoStore')} />;
 
   const storeById = new Map(stores.map((s) => [s.id, s]));
-  const live = sessions.find((s) => s.status === 'live');
-  const upcoming = sessions.filter((s) => s.status === 'upcoming');
-  const totalRevenue = sessions.reduce((s, r) => s + r.revenue, 0);
+  // Shell-level store scope narrows every stat and the session table.
+  const scopedSessions = isAllStores ? sessions : sessions.filter((s) => s.storeId === scope);
+  const live = scopedSessions.find((s) => s.status === 'live');
+  const upcoming = scopedSessions.filter((s) => s.status === 'upcoming');
+  const totalRevenue = scopedSessions.reduce((s, r) => s + r.revenue, 0);
 
   const sessionColumns: ColumnsType<LiveSession> = [
     { title: t('live.title'), dataIndex: 'title', width: 200, ellipsis: true },
@@ -77,7 +81,7 @@ export function LiveManagementPage() {
       <Row gutter={[12, 12]} style={{ padding: '0 24px', marginBottom: 12 }}>
         <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.liveCount')} value={live ? 1 : 0} valueStyle={{ color: 'var(--ark-red)', fontSize: 20 }} /></Card></Col>
         <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.upcomingCount')} value={upcoming.length} valueStyle={{ color: '#1890ff', fontSize: 20 }} /></Card></Col>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.endedCount')} value={sessions.filter((s) => s.status === 'ended').length} /></Card></Col>
+        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.endedCount')} value={scopedSessions.filter((s) => s.status === 'ended').length} /></Card></Col>
         <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.totalRevenue')} value={`¥${(totalRevenue / 10000).toFixed(1)}万`} valueStyle={{ color: 'var(--ark-purple)', fontSize: 20 }} /></Card></Col>
       </Row>
 
@@ -95,7 +99,7 @@ export function LiveManagementPage() {
         items={[
           {
             key: 'sessions', label: <><PlayCircleOutlined />{t('live.sessionsTab')}</>,
-            children: <Table<LiveSession> rowKey="id" columns={sessionColumns} dataSource={sessions} pagination={{ pageSize: 15 }} size="middle" locale={{ emptyText: <Empty description={t('live.noSessions')} /> }} />,
+            children: <Table<LiveSession> rowKey="id" columns={sessionColumns} dataSource={scopedSessions} pagination={{ pageSize: 15 }} size="middle" locale={{ emptyText: <Empty description={t('live.noSessions')} /> }} />,
           },
           {
             key: 'materials', label: <><DatabaseOutlined />{t('live.materialsTab')}</>,
@@ -105,17 +109,21 @@ export function LiveManagementPage() {
                   const items = materials.filter((m) => m.type === cat.key);
                   return (
                     <Card key={cat.key} size="small" title={<Space>{cat.icon}{cat.name} <Tag>{items.length}</Tag></Space>}>
-                      <Space wrap size={[8, 8]}>
-                        {items.map((m) => (
-                          <Card key={m.id} size="small" style={{ width: 200 }} hoverable>
-                            <Space direction="vertical" size={0}>
-                              <Typography.Text strong style={{ fontSize: 12 }}>{m.name}</Typography.Text>
-                              <Space size={4} wrap>{m.tags.map((tg) => <Tag key={tg} style={{ fontSize: 10 }}>{tg}</Tag>)}</Space>
-                              <Typography.Text type="secondary" style={{ fontSize: 10 }}>{dayjs(m.uploadedAt).format('YYYY-MM-DD')}</Typography.Text>
-                            </Space>
-                          </Card>
-                        ))}
-                      </Space>
+                      {items.length === 0 ? (
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('live.noMaterials')} />
+                      ) : (
+                        <Space wrap size={[8, 8]}>
+                          {items.map((m) => (
+                            <Card key={m.id} size="small" style={{ width: 200 }} hoverable>
+                              <Space direction="vertical" size={0}>
+                                <Typography.Text strong style={{ fontSize: 12 }}>{m.name}</Typography.Text>
+                                <Space size={4} wrap>{m.tags.map((tg) => <Tag key={tg} style={{ fontSize: 10 }}>{tg}</Tag>)}</Space>
+                                <Typography.Text type="secondary" style={{ fontSize: 10 }}>{dayjs(m.uploadedAt).format('YYYY-MM-DD')}</Typography.Text>
+                              </Space>
+                            </Card>
+                          ))}
+                        </Space>
+                      )}
                     </Card>
                   );
                 })}
@@ -143,7 +151,9 @@ function ScriptModal({ session, onClose }: { session: LiveSession | null; onClos
   return (
     <Modal title={`${t('live.scripts')} — ${session.title}`} open={!!session} onCancel={onClose} footer={null} width={700}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        {scripts.map((s) => (
+        {scripts.length === 0 ? (
+          <Empty description={t('live.noScripts')} />
+        ) : scripts.map((s) => (
           <Card key={s.id} size="small" title={<Space><Tag color={phaseColors[s.phase]}>{t(`live.phase_${s.phase}`)}</Tag>{s.title} — {s.duration}{t('live.min')}</Space>}>
             <Typography.Paragraph style={{ fontSize: 13, marginBottom: 4 }}>{s.content}</Typography.Paragraph>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('live.notes')}: {s.notes}</Typography.Text>

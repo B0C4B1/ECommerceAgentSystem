@@ -1,5 +1,6 @@
 import { mockDelay } from './client';
 import { insertFirst, removeWhere, replaceItem } from './mockRepository';
+import { registerMockState } from './mockPersistence';
 import type { AgentModelBinding, ModelInfo, ModelUsageStats } from '../types/domain';
 
 const platformModels: ModelInfo[] = [
@@ -78,6 +79,14 @@ export const modelsApi = {
     mockDelay({ ok: apiKey.trim().startsWith('sk-') && apiKey.trim().length >= 12 }, 600),
   removeCustom: (modelId: string): Promise<void> => {
     removeWhere(customModels, (model) => model.id === modelId);
+    // 模型被删除后，原本指向它的 Agent 绑定会失效，回落到「自动选择」。
+    bindings.forEach((binding) => {
+      if (binding.boundModelId === modelId) {
+        binding.boundModelId = 'auto';
+        binding.boundModelName = '自动选择';
+      }
+    });
+    delete usageStats[modelId];
     return mockDelay(undefined);
   },
   getUsageStats: (): Promise<ModelUsageStats[]> => {
@@ -94,3 +103,15 @@ export const modelsApi = {
     return mockDelay([...bindings]);
   }
 };
+
+// 用户添加的自定义模型与 Agent 绑定需要跨刷新保留。
+registerMockState(
+  'models',
+  () => ({ customModels: customModels.map((m) => ({ ...m })), bindings: bindings.map((b) => ({ ...b })) }),
+  (value) => {
+    if (!value || typeof value !== 'object') return;
+    const saved = value as { customModels?: ModelInfo[]; bindings?: AgentModelBinding[] };
+    if (Array.isArray(saved.customModels)) customModels.splice(0, customModels.length, ...saved.customModels);
+    if (Array.isArray(saved.bindings)) bindings.splice(0, bindings.length, ...saved.bindings);
+  }
+);

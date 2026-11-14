@@ -43,7 +43,6 @@ export function CalendarView({ campaigns, stores }: Props) {
               fontSize: 10, lineHeight: '16px', padding: '0 3px', marginBottom: 1,
               background: TYPE_COLORS[c.type] ?? 'var(--ark-purple)',
               color: '#fff', borderRadius: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              cursor: 'pointer',
             }}>
               {c.name}
             </div>

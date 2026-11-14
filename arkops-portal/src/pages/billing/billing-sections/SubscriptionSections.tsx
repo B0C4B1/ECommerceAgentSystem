@@ -39,9 +39,11 @@ export function PlansSection() {
   const { data: allPlans } = useQuery({ queryKey: ['allPlans'], queryFn: financeApi.getAllPlans });
   const upgradeMutation = useMutation({
     mutationFn: financeApi.upgradePlan,
-    onSuccess: () => {
-      message.success(t('subscription.upgradeSuccess'));
-      queryClient.invalidateQueries({ queryKey: ['currentPlan'] });
+    onSuccess: (plan) => {
+      message.success(t('subscription.planChanged', { plan: plan.tier }));
+      ['currentPlan', 'usageOverview', 'currentBill', 'overageRates', 'trialStatus', 'costAnalysis'].forEach((key) =>
+        queryClient.invalidateQueries({ queryKey: [key] }),
+      );
     }
   });
 
@@ -76,12 +78,12 @@ export function PlansSection() {
           }
           return (
             <Button
-              type="primary"
+              type={currentPlan && tiers.indexOf(tier) < tiers.indexOf(currentPlan.tier) ? 'default' : 'primary'}
               size="small"
               onClick={() => upgradeMutation.mutate(tier)}
               loading={upgradeMutation.isPending}
             >
-              {t('subscription.upgrade')}
+              {currentPlan && tiers.indexOf(tier) < tiers.indexOf(currentPlan.tier) ? t('subscription.downgrade') : t('subscription.upgrade')}
             </Button>
           );
         }
@@ -183,7 +185,13 @@ export function PlansSection() {
 
 export function CurrentPlanSection() {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const { data: currentPlan } = useQuery({ queryKey: ['currentPlan'], queryFn: financeApi.getCurrentPlan });
+  const { data: autoRenew = true } = useQuery({ queryKey: ['autoRenew'], queryFn: financeApi.getAutoRenew });
+  const autoRenewMutation = useMutation({
+    mutationFn: financeApi.setAutoRenew,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['autoRenew'] })
+  });
 
   return (
     <Card title={<><CrownOutlined /> {t('subscription.currentPlan')}</>} style={{ marginBottom: 24 }}>
@@ -193,15 +201,15 @@ export function CurrentPlanSection() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Statistic title={t('subscription.nextBillDate')} value={computeNextBillDate()} valueStyle={{ fontWeight: 600 }} />
-          <Typography.Text type="secondary">{t('subscription.autoRenew')} <Tag color="green" style={{ marginLeft: 4 }}>{t('subscription.autoRenewOn')}</Tag></Typography.Text>
+          <Typography.Text type="secondary">{t('subscription.autoRenew')} <Tag color={autoRenew ? 'green' : 'default'} style={{ marginLeft: 4 }}>{autoRenew ? t('subscription.autoRenewOn') : t('subscription.autoRenewOff')}</Tag></Typography.Text>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Statistic title={t('subscription.billingCycle')} value={t('subscription.monthly')} prefix={<SwapOutlined />} valueStyle={{ fontWeight: 600 }} />
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{t('subscription.autoRenew')}</Typography.Text>
-          <Switch defaultChecked />
-          <Tag color="green" style={{ marginLeft: 8 }}>{t('subscription.autoRenewOn')}</Tag>
+          <Switch checked={autoRenew} onChange={(checked) => autoRenewMutation.mutate(checked)} />
+          <Tag color={autoRenew ? 'green' : 'default'} style={{ marginLeft: 8 }}>{autoRenew ? t('subscription.autoRenewOn') : t('subscription.autoRenewOff')}</Tag>
         </Col>
       </Row>
     </Card>
@@ -232,8 +240,6 @@ export function PaymentMethodsSection() {
             <Typography.Text strong>{t('subscription.bankTransfer')}</Typography.Text>
             <br />
             <Typography.Text type="secondary">{t('subscription.bankTransferDesc')}</Typography.Text>
-            <br />
-            <Button type="link" size="small" style={{ padding: 0, marginTop: 8 }}>{t('subscription.viewDetails')}</Button>
           </Card>
         </Col>
         <Col xs={24} sm={8}>
@@ -242,8 +248,6 @@ export function PaymentMethodsSection() {
             <Typography.Text strong>{t('subscription.transfer')}</Typography.Text>
             <br />
             <Typography.Text type="secondary">{t('subscription.transferDesc')}</Typography.Text>
-            <br />
-            <Button type="primary" size="small" ghost style={{ marginTop: 8 }}>{t('subscription.addPayment')}</Button>
           </Card>
         </Col>
       </Row>
@@ -253,20 +257,31 @@ export function PaymentMethodsSection() {
 
 // ========== 发票信息 ==========
 
+const DEFAULT_INVOICE = {
+  companyName: '上海出海鲸科技有限公司',
+  taxId: '91310000XXXXXXXXXX',
+  address: '上海市浦东新区张江高科技园区XX路XX号',
+  phone: '+86 21-XXXXXXXX',
+  email: 'finance@chujingtech.com',
+  bankName: '中国工商银行上海浦东分行',
+  bankAccount: '1001 XXXX XXXX 1234 567'
+};
+
 export function InvoiceSection() {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [form] = Form.useForm();
-
-  const invoiceData = {
-    companyName: '上海出海鲸科技有限公司',
-    taxId: '91310000XXXXXXXXXX',
-    address: '上海市浦东新区张江高科技园区XX路XX号',
-    phone: '+86 21-XXXXXXXX',
-    email: 'finance@chujingtech.com',
-    bankName: '中国工商银行上海浦东分行',
-    bankAccount: '1001 XXXX XXXX 1234 567'
-  };
+  const { data: savedInvoice } = useQuery({ queryKey: ['invoiceInfo'], queryFn: financeApi.getInvoiceInfo });
+  const invoiceData = savedInvoice ?? DEFAULT_INVOICE;
+  const saveMutation = useMutation({
+    mutationFn: financeApi.updateInvoiceInfo,
+    onSuccess: () => {
+      message.success(t('subscription.invoiceSaved'));
+      queryClient.invalidateQueries({ queryKey: ['invoiceInfo'] });
+      setEditing(false);
+    }
+  });
 
   return (
     <Card
@@ -290,7 +305,7 @@ export function InvoiceSection() {
           <Descriptions.Item label={t('subscription.invoiceType')}><Tag color="blue">{t('subscription.vatSpecial')}</Tag></Descriptions.Item>
         </Descriptions>
       ) : (
-        <Form form={form} layout="vertical" onFinish={() => { message.success(t('subscription.invoiceSaved')); setEditing(false); }}>
+        <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)}>
           <Row gutter={16}>
             <Col xs={24} sm={12}><Form.Item label={t('subscription.companyName')} name="companyName" rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col xs={24} sm={12}><Form.Item label={t('subscription.taxId')} name="taxId" rules={[{ required: true }]}><Input /></Form.Item></Col>

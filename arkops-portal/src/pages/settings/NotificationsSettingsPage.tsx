@@ -1,10 +1,11 @@
-import { PlusOutlined, SendOutlined } from '@ant-design/icons';
+import { LinkOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { notificationsApi } from '../../api/notifications';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
 import type { NotificationChannelConfig, NotificationChannelType, NotificationEventKey } from '../../types/domain';
 
@@ -22,9 +23,13 @@ const CHANNEL_TYPE_OPTIONS: { value: NotificationChannelType; label: string }[] 
 
 export function NotificationsSettingsPage() {
   const { t } = useI18n();
+  const { can } = usePermission();
+  const canUpdateNotifications = can('notifications', 'update');
   const queryClient = useQueryClient();
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addForm] = Form.useForm();
+  const [endpointChannel, setEndpointChannel] = useState<NotificationChannelConfig | null>(null);
+  const [endpointForm] = Form.useForm();
 
   const { data: channels = [] } = useQuery({ queryKey: ['notification-channels'], queryFn: notificationsApi.listChannels });
 
@@ -47,12 +52,29 @@ export function NotificationsSettingsPage() {
     }
   });
 
+  const endpointMutation = useMutation({
+    mutationFn: (params: { channelId: string; endpoint: string }) =>
+      notificationsApi.updateEndpoint(params.channelId, params.endpoint),
+    onSuccess: () => {
+      message.success(t('notify.endpointUpdated'));
+      queryClient.invalidateQueries({ queryKey: ['notification-channels'] });
+      setEndpointChannel(null);
+      endpointForm.resetFields();
+    }
+  });
+
+  const openEndpointModal = (channel: NotificationChannelConfig) => {
+    setEndpointChannel(channel);
+    endpointForm.setFieldsValue({ endpoint: channel.endpoint ?? '' });
+  };
+
   const testMutation = useMutation({
     mutationFn: notificationsApi.testSend,
     onSuccess: (result, channelId) => {
       const channel = channels.find((c) => c.id === channelId);
       if (result.ok) {
         message.success(t('notify.testSent', { name: channel?.name ?? '' }));
+        queryClient.invalidateQueries({ queryKey: ['notification-channels'] });
       } else {
         message.error(t('notify.testFailed', { name: channel?.name ?? '' }));
       }
@@ -82,15 +104,28 @@ export function NotificationsSettingsPage() {
               {channel.status === 'connected' ? t('notify.connected') : t('notify.notConfigured')}
             </Tag>
           </Space>
-          <Button
-            size="small"
-            icon={<SendOutlined />}
-            disabled={channel.status !== 'connected'}
-            loading={testMutation.isPending && testMutation.variables === channel.id}
-            onClick={() => testMutation.mutate(channel.id)}
-          >
-            {t('notify.testSend')}
-          </Button>
+          {channel.endpoint ? (
+            <>
+              <Button
+                size="small"
+                icon={<SendOutlined />}
+                disabled={!canUpdateNotifications}
+                loading={testMutation.isPending && testMutation.variables === channel.id}
+                onClick={() => testMutation.mutate(channel.id)}
+              >
+                {channel.status === 'connected' ? t('notify.testSend') : t('notify.verifyConnect')}
+              </Button>
+              {canUpdateNotifications && (
+                <Button size="small" type="link" onClick={() => openEndpointModal(channel)}>
+                  {t('notify.editEndpoint')}
+                </Button>
+              )}
+            </>
+          ) : canUpdateNotifications ? (
+            <Button size="small" icon={<LinkOutlined />} onClick={() => openEndpointModal(channel)}>
+              {t('notify.setEndpoint')}
+            </Button>
+          ) : null}
         </Space>
       ),
       key: channel.id,
@@ -100,7 +135,7 @@ export function NotificationsSettingsPage() {
         <Switch
           size="small"
           checked={channel.events[row.key]}
-          disabled={channel.status !== 'connected'}
+          disabled={channel.status !== 'connected' || !canUpdateNotifications}
           onChange={(checked) => toggleMutation.mutate({ channelId: channel.id, event: row.key, enabled: checked })}
         />
       )
@@ -115,11 +150,27 @@ export function NotificationsSettingsPage() {
         title={t('settings.notificationsTitle')}
         description={t('settings.notificationsDescription')}
         actions={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
-            {t('settings.addChannel')}
-          </Button>
+          canUpdateNotifications ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
+              {t('settings.addChannel')}
+            </Button>
+          ) : undefined
         }
       />
+      {channels.length === 0 && (
+        <Alert
+          type="info"
+          showIcon
+          message={t('notify.noChannels')}
+          action={
+            canUpdateNotifications ? (
+              <Button size="small" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
+                {t('settings.addChannel')}
+              </Button>
+            ) : undefined
+          }
+        />
+      )}
       <Card title={t('notify.matrixTitle')}>
         <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
           {t('notify.matrixDesc')}
@@ -133,6 +184,34 @@ export function NotificationsSettingsPage() {
           scroll={{ x: 640 }}
         />
       </Card>
+
+      <Modal
+        title={t('notify.setEndpoint')}
+        open={endpointChannel !== null}
+        onOk={() => endpointForm.submit()}
+        onCancel={() => { setEndpointChannel(null); endpointForm.resetFields(); }}
+        confirmLoading={endpointMutation.isPending}
+      >
+        <Form
+          form={endpointForm}
+          layout="vertical"
+          onFinish={(values: { endpoint: string }) => {
+            if (!endpointChannel) return;
+            endpointMutation.mutate({ channelId: endpointChannel.id, endpoint: values.endpoint });
+          }}
+        >
+          <Form.Item
+            label={endpointChannel?.type === 'webhook' ? 'Webhook URL' : t('notify.botWebhookUrl')}
+            name="endpoint"
+            rules={[{ required: true, message: t('notify.endpointRequired') }]}
+          >
+            <Input placeholder="https://..." />
+          </Form.Item>
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 0 }}>
+            {t('notify.endpointEditHint')}
+          </Typography.Paragraph>
+        </Form>
+      </Modal>
 
       <Modal
         title={t('settings.addChannel')}

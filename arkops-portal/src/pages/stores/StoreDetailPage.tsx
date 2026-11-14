@@ -16,17 +16,20 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, Form, Input, Modal, Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Form, Input, Modal, Progress, Row, Select, Space, Spin, Statistic, Table, Tabs, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { operatingModelApi } from '../../api/operatingModel';
 import { storeBusinessApi } from '../../api/storeBusiness';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { TrendBarChart } from '../../components/charts/TrendBarChart';
 import { DescriptionPanel } from '../../components/detail/DescriptionPanel';
 import { DetailSection } from '../../components/detail/DetailSection';
+import { EmptyState } from '../../components/EmptyState';
 import { MetricCard } from '../../components/metrics/MetricCard';
 import { PageHeader } from '../../components/PageHeader';
 import { StatusBadge } from '../../components/StatusBadge';
@@ -49,6 +52,10 @@ const RECOMMENDED_AUTH_METHOD: Record<string, Store['authMethod']> = {
 
 export function StoreDetailPage({ mode }: { mode?: 'new' }) {
   const { t } = useI18n();
+  const { can } = usePermission();
+  const canCreateStore = can('stores', 'create');
+  const canUpdateStore = can('stores', 'update');
+  const canDeleteStore = can('stores', 'delete');
   const { storeId } = useParams();
   const parsedStoreId = parseAllMallId(storeId);
   const navigate = useNavigate();
@@ -77,7 +84,7 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
     navigate(`/stores/${next}?reloginQueue=${reloginQueue.join(',')}`);
   };
 
-  const { data: store } = useQuery({
+  const { data: store, isLoading: storeLoading } = useQuery({
     queryKey: ['store', parsedStoreId],
     queryFn: () => storesApi.get(parsedStoreId!),
     enabled: parsedStoreId !== undefined && mode !== 'new'
@@ -142,6 +149,15 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
     () => RECOMMENDED_AUTH_METHOD[platform]
   );
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  // 店铺名与表单同源，输入时实时反映到「授权服务」的说明文案。
+  const createdStoreName = Form.useWatch('name', form);
+
+  // 重新授权时以店铺现有平台/授权方式为默认值，避免默认落到拼多多导致上错平台。
+  useEffect(() => {
+    if (!store) return;
+    setPlatform(store.platform);
+    setAuthMethod(store.authMethod);
+  }, [store?.id]);
 
   // 各平台授权服务名称映射（运营后台 / 投流 / 客服 / 物流 / 财务）
   const platformServiceNames: Record<string, Record<string, { title: string; desc: string }>> = {
@@ -209,10 +225,20 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
           }
           style={{ marginBottom: 16 }}
         />
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={(values) => createStore.mutate({
+            name: values.name, platform, authMethod,
+            apiKey: values.apiKey, apiSecret: values.apiSecret, account: values.account,
+            region: values.region, currency: values.currency,
+            services: selectedServices,
+          })}
+        >
         {/* 步骤1：店铺信息 */}
         <Card title={t('stores.stepPlatform')} style={{ marginBottom: 16 }}>
-          <Form.Item label={t('stores.name')} name="storeName" rules={[{ required: true }]}>
-            <Input placeholder={t('stores.namePlaceholder')} onChange={(e) => form.setFieldsValue({ name: e.target.value })} />
+          <Form.Item label={t('stores.name')} name="name" rules={[{ required: true, message: t('stores.required') }]}>
+            <Input placeholder={t('stores.namePlaceholder')} />
           </Form.Item>
           <Form.Item label={t('stores.platform')}>
             <Select
@@ -261,19 +287,9 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
           </Row>
         </Card>
 
-        {/* 步骤3+4：授权配置 + 开通服务（Form 包裹） */}
+        {/* 步骤3+4：授权配置 + 开通服务 */}
         {authMethod && (
-          <Form
-            form={form}
-            layout="vertical"
-            onFinish={(values) => createStore.mutate({
-              name: values.name, platform, authMethod,
-              apiKey: values.apiKey, apiSecret: values.apiSecret, account: values.account,
-              region: values.region, currency: values.currency,
-              services: selectedServices,
-            })}
-          >
-            <Form.Item name="name" hidden><Input /></Form.Item>
+          <>
 
             {/* 步骤3：授权配置 */}
             <Card title={<><SettingOutlined /> {t('stores.stepConfig')}</>} style={{ marginBottom: 16 }}>
@@ -332,9 +348,9 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
             </Card>
 
             {/* 步骤4：授权服务 */}
-            <Card title={<><ApiOutlined style={{ marginRight: 8 }} />授权服务</>} style={{ marginBottom: 16 }}>
+            <Card title={<><ApiOutlined style={{ marginRight: 8 }} />{t('stores.authorizedServices')}</>} style={{ marginBottom: 16 }}>
               <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 16 }}>
-                选择需要为「{form.getFieldValue('name') || '新店铺'}」授权的平台服务，后续可在店铺设置中随时调整。
+                {t('stores.authorizedServicesHint', { name: createdStoreName || t('stores.newStore') })}
               </Typography.Paragraph>
               <Checkbox.Group
                 style={{ width: '100%' }}
@@ -380,12 +396,13 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
               <Button onClick={() => navigate('/stores')}>
                 {t('common.cancel')}
               </Button>
-              <Button type="primary" htmlType="submit" loading={createStore.isPending} size="large">
+              <Button type="primary" htmlType="submit" loading={createStore.isPending} size="large" disabled={!canCreateStore}>
                 {t('stores.create')}
               </Button>
             </Space>
-          </Form>
+          </>
         )}
+        </Form>
       </div>
     );
   }
@@ -437,8 +454,44 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
     }
   ];
 
+  const effectivePolicy = operatingModelApi.getEffectivePolicy(parsedStoreId ?? 0);
+
   const settingsTab = (
     <>
+      {/* P1: 经营策略摘要 — 解释「为什么这条动作进了/没进待办」 */}
+      <DescriptionPanel
+        title={<><SettingOutlined /> {t('goal.policyTitle')}</>}
+        spacing="bottom"
+        items={[
+          {
+            label: t('goal.storeAutonomy'),
+            value:
+              effectivePolicy.source === 'store' ? (
+                <Space size={6}>
+                  <Tag color="blue">{effectivePolicy.autonomy}</Tag>
+                  <Typography.Text type="secondary">{t('goal.source_store')}</Typography.Text>
+                </Space>
+              ) : (
+                <Space size={6}>
+                  <Tag>{t('goal.followScenario')}</Tag>
+                  <Typography.Text type="secondary">{t('goal.inheritScenarioNote')}</Typography.Text>
+                </Space>
+              ),
+          },
+          { label: t('goal.adBudget'), value: `¥${effectivePolicy.budgetPool.adMonthly}` },
+          { label: t('goal.promoBudget'), value: `¥${effectivePolicy.budgetPool.promoMonthly}` },
+          { label: t('goal.minGrossMargin'), value: `${effectivePolicy.guards.minGrossMargin}%` },
+          { label: t('goal.maxDiscount'), value: `${effectivePolicy.guards.maxDiscountPct}%` },
+          {
+            label: t('goal.monthlyBudgetCap'),
+            value: `¥${new Intl.NumberFormat('zh-CN').format(effectivePolicy.guards.monthlyBudgetCap)}`,
+          },
+        ]}
+      />
+      <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16, fontSize: 12 }}>
+        {t('goal.guardSourceNote')}
+      </Typography.Text>
+
       {/* 店铺主体授权 */}
       <DescriptionPanel
         title={<><LinkOutlined /> {t('stores.primaryAuth')}</>}
@@ -464,7 +517,7 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
       {/* 服务授权 */}
       <Card
         title={<><ApiOutlined /> {t('stores.serviceAuth')} ({store?.connections?.length ?? 0})</>}
-        extra={<Button icon={<PlusOutlined />} onClick={() => setConnectionModalOpen(true)}>{t('stores.addService')}</Button>}
+        extra={canUpdateStore ? <Button icon={<PlusOutlined />} onClick={() => setConnectionModalOpen(true)}>{t('stores.addService')}</Button> : undefined}
         style={{ marginBottom: 16 }}
       >
         {(!store?.connections || store.connections.length === 0) ? (
@@ -522,6 +575,34 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
     </>
   );
 
+  if (storeLoading) {
+    return (
+      <div className="page-stack">
+        <PageHeader title={t('stores.detailTitle')} breadcrumb={[{ title: t('stores.title'), href: '/stores' }]} />
+        <div style={{ display: 'grid', placeItems: 'center', minHeight: 240 }}>
+          <Spin size="large" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!store) {
+    return (
+      <div className="page-stack">
+        <PageHeader
+          title={t('stores.detailTitle')}
+          breadcrumb={[{ title: t('stores.title'), href: '/stores' }]}
+          onBack={() => navigate(-1)}
+        />
+        <EmptyState
+          description={t('stores.notFoundDesc')}
+          actionText={t('stores.backToList')}
+          onAction={() => navigate('/stores')}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -532,9 +613,11 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
           { title: store?.name ?? t('stores.detailTitle') }
         ]}
         actions={
-          <Button danger icon={<StopOutlined />} disabled={store?.status === 'revoked'} onClick={() => setRevokeModalOpen(true)}>
-            {t('stores.revoke')}
-          </Button>
+          canDeleteStore ? (
+            <Button danger icon={<StopOutlined />} disabled={store?.status === 'revoked'} onClick={() => setRevokeModalOpen(true)}>
+              {t('stores.revoke')}
+            </Button>
+          ) : undefined
         }
       />
       {/* A8: dedicated revoke confirmation spelling out the consequences (2.12). */}
@@ -564,9 +647,11 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
           message={t('storewizard.revokedAlertTitle')}
           description={t('storewizard.revokedAlertDesc')}
           action={
-            <Button type="primary" loading={reauthorizeMutation.isPending} onClick={() => reauthorizeMutation.mutate()}>
-              {t('storewizard.reauthorize')}
-            </Button>
+            canUpdateStore ? (
+              <Button type="primary" loading={reauthorizeMutation.isPending} onClick={() => reauthorizeMutation.mutate()}>
+                {t('storewizard.reauthorize')}
+              </Button>
+            ) : undefined
           }
           style={{ marginBottom: 16 }}
         />
@@ -603,9 +688,11 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
           message={t('storewizard.reloginAlertTitle')}
           description={t('storewizard.reloginAlertDesc')}
           action={
-            <Button type="primary" loading={renewMutation.isPending} onClick={() => renewMutation.mutate()}>
-              {t('stores.reloginNow')}
-            </Button>
+            canUpdateStore ? (
+              <Button type="primary" loading={renewMutation.isPending} onClick={() => renewMutation.mutate()}>
+                {t('stores.reloginNow')}
+              </Button>
+            ) : undefined
           }
           style={{ marginBottom: 16 }}
         />
@@ -619,18 +706,20 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
           message={t('storewizard.expiringAlertTitle', { days: expiringInDays })}
           description={t('storewizard.expiringAlertDesc', { date: dayjs(store.authExpiresAt).format('MM-DD HH:mm') })}
           action={
-            <Button type="primary" loading={renewMutation.isPending} onClick={() => renewMutation.mutate()}>
-              {t('inbox.renewNow')}
-            </Button>
+            canUpdateStore ? (
+              <Button type="primary" loading={renewMutation.isPending} onClick={() => renewMutation.mutate()}>
+                {t('inbox.renewNow')}
+              </Button>
+            ) : undefined
           }
           style={{ marginBottom: 16 }}
         />
       )}
       {/* D7 Round 2 (item 5): show missing services with impact estimation */}
-      <ServiceGapCard storeId={parsedStoreId} store={store} onAddService={(serviceType) => {
+      <ServiceGapCard storeId={parsedStoreId} store={store} onAddService={canUpdateStore ? (serviceType) => {
         if (serviceType) connectionForm.setFieldsValue({ serviceType });
         setConnectionModalOpen(true);
-      }} />
+      } : undefined} />
       <Tabs
         defaultActiveKey="overview"
         items={[
@@ -647,7 +736,7 @@ export function StoreDetailPage({ mode }: { mode?: 'new' }) {
  * Detects missing high-value services and suggests activation with
  * impact estimation and blocked-agent visibility.
  */
-function ServiceGapCard({ storeId, store, onAddService }: { storeId: AllMallId | undefined; store?: Store; onAddService: (serviceType?: string) => void }) {
+function ServiceGapCard({ storeId, store, onAddService }: { storeId: AllMallId | undefined; store?: Store; onAddService?: (serviceType?: string) => void }) {
   const { t } = useI18n();
   const { data: gaps = [] } = useQuery({
     queryKey: ['serviceGaps', storeId],
@@ -694,9 +783,11 @@ function ServiceGapCard({ storeId, store, onAddService }: { storeId: AllMallId |
                   {t('stores.serviceGapImpact')} +¥{gap.estimatedGmvImpact.toLocaleString()}
                 </Typography.Text>
               )}
-              <Button size="small" type="link" onClick={() => onAddService(gap.serviceType)}>
-                {t('common.add')}
-              </Button>
+              {onAddService && (
+                <Button size="small" type="link" onClick={() => onAddService(gap.serviceType)}>
+                  {t('common.add')}
+                </Button>
+              )}
             </Space>
           </div>
         ))}

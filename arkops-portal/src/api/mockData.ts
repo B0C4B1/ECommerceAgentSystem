@@ -1,4 +1,5 @@
 import dayjs from 'dayjs';
+import { registerMockState } from './mockPersistence';
 import type { Approval, ApprovalEvidenceField, AuditLog, Member, PriorApprovalRecord, Store, StoreConnection, Task } from '../types/domain'; // WS-B: added ApprovalEvidenceField/PriorApprovalRecord
 
 // WS-B (B4/B5): anchor mock timestamps to the real clock so approval expiry
@@ -1066,81 +1067,90 @@ export const auditLogs: AuditLog[] = [
     id: 6001,
     actor: 'MuleRun Agent', action: '需要审批', entity: '任务', entityId: 3001,
     summary: '广告计划 C-102 预算调整超过租户风险阈值，暂停等待审批。',
-    at: now.subtract(12, 'minute').toISOString(), category: 'approval', linkTo: '/approvals/5001'
+    at: now.subtract(12, 'minute').toISOString(), category: 'approval', linkTo: '/agents/approvals/5001', storeId: 1001
   },
   {
     id: 6002,
-    actor: '李鹏', action: '审批通过', entity: '审批', entityId: 5003,
-    summary: '批准 拼多多 蓝牙耳机 Pro 价格下调 8%。',
-    at: now.subtract(1, 'hour').toISOString(), category: 'approval', linkTo: '/approvals/5003'
+    actor: '李鹏', action: '审批通过', entity: '审批', entityId: 5002,
+    summary: '批准 拼多多旗舰店 新品卖点文案，商品草稿已标记为可发布。',
+    at: now.subtract(1, 'hour').toISOString(), category: 'approval', linkTo: '/agents/approvals/5002', storeId: 1001
   },
   {
+    // 历史审批单已归档，不再提供详情链接，避免从日志点进一条仍显示“待审批”的记录。
     id: 6003,
-    actor: '风控审批人', action: '审批通过', entity: '审批', entityId: 5002,
-    summary: '双人审批：批准 淘宝 户外店广告预算上调 15%。',
-    at: now.subtract(3, 'hour').toISOString(), category: 'approval', linkTo: '/approvals/5002'
+    actor: '风控审批人', action: '审批通过', entity: '审批', entityId: 4998,
+    summary: '双人审批：批准 淘宝户外用品店 广告预算上调 15%。',
+    at: now.subtract(3, 'hour').toISOString(), category: 'approval', storeId: 1002
   },
   {
     id: 6004,
-    actor: 'AllMall 系统', action: '超时自动拒绝', entity: '审批', entityId: 5005,
+    actor: 'AllMall 系统', action: '超时自动拒绝', entity: '审批', entityId: 4997,
     summary: '京东自营店满减促销审批超时 24 小时，自动拒绝。',
-    at: now.subtract(1, 'day').toISOString(), category: 'approval'
+    at: now.subtract(1, 'day').toISOString(), category: 'approval', storeId: 1003
   },
   {
     id: 6005,
-    actor: '李鹏', action: '审批拒绝', entity: '审批', entityId: 5001,
+    actor: '李鹏', action: '审批拒绝', entity: '审批', entityId: 4996,
     summary: '拒绝 拼多多 广告预算增加 200%，认为 ROI 不支撑。',
-    at: now.subtract(2, 'day').toISOString(), category: 'approval', linkTo: '/approvals/5001'
+    at: now.subtract(2, 'day').toISOString(), category: 'approval', storeId: 1001
   },
   // ===== Agent 自动操作 =====
   {
     id: 6006,
     actor: '广告投放 Agent', action: '暂停广告计划', entity: '广告计划', entityId: 'campaign_c102',
     summary: 'ROI 连续 3 天低于 1.5 红线，自动暂停广告计划 C-102。',
-    at: now.subtract(8, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/ads_optimizer'
+    at: now.subtract(8, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/ads_optimizer', storeId: 1001
   },
   {
     id: 6007,
     actor: '定价策略 Agent', action: '动态调价', entity: '商品', entityId: 'prod_001',
     summary: 'SKU BT-E01 蓝牙耳机 Pro 竞品均价下跌 8%，自动调价 ¥39.99 → ¥36.99。',
-    at: now.subtract(7, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/pricing_strategy'
+    at: now.subtract(7, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/pricing_strategy', storeId: 1002
   },
   {
     id: 6008,
     actor: 'CRM 复购 Agent', action: '发放优惠券', entity: '客户群', entityId: 'segment_lapsed',
     summary: '向沉默客户群发放 15% OFF 优惠券 167 张，预算 ¥250。',
-    at: now.subtract(6, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/crm_retention'
+    at: now.subtract(6, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/crm_retention', storeId: 1001
   },
   {
     id: 6009,
     actor: '评价管理 Agent', action: '自动回复', entity: '评价', entityId: 'rev_003',
     summary: '自动回复 5 星好评 3 条，生成回复草稿 2 条。',
-    at: now.subtract(5, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/review_manager'
+    at: now.subtract(5, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/review_manager', storeId: 1001
   },
   {
     id: 6010,
     actor: '风险控制 Agent', action: '阻断操作', entity: '商品描述', entityId: 'prod_001',
     summary: '检测到 "最强降噪" 绝对化用语，已阻断发布。',
-    at: now.subtract(4, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/risk_control'
+    at: now.subtract(4, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/risk_control', storeId: 1002
   },
   {
     id: 6011,
     actor: '库存预警 Agent', action: '低库存告警', entity: '商品', entityId: 'prod_003',
     summary: 'SKU CK-C01 65W GaN 充电器库存 35 件低于安全阈值 50，建议补货 200 件。',
-    at: now.subtract(6, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/inventory_alert'
+    at: now.subtract(6, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/inventory_alert', storeId: 1003
   },
   {
     id: 6012,
     actor: '财务对账 Agent', action: '账单比对', entity: '对账', entityId: 'bill_202606',
     summary: '拼多多 6 月账单与内部记录差异 ¥0.00，完全匹配。',
-    at: now.subtract(5, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/finance_audit'
+    at: now.subtract(5, 'hour').toISOString(), category: 'agent_action', linkTo: '/agents/finance_audit', storeId: 1001
+  },
+  {
+    // P41.1：与初始异常 ex_008 配对的超时收尾回执。「自动处理」靠 entityId 回到该条目核对结论；
+    // 真实链路里这一条由 exceptions.ts#logExceptionAction 在超时默认收尾时写入，字段口径一致。
+    id: 6101,
+    actor: 'Agent（超时策略）', action: '解决异常', entity: '异常', entityId: 'ex_008',
+    summary: '超时默认：维持现有护栏（折扣上限 20%），未放行 25% 折扣。 - ex_008',
+    at: now.subtract(6, 'hour').toISOString(), category: 'exception', storeId: 1002
   },
   // ===== 人工操作 =====
   {
     id: 6013,
     actor: '李鹏', action: '店铺已连接', entity: '店铺', entityId: 1001,
     summary: '拼多多旗舰店通过 connectToken 完成会话绑定。',
-    at: now.subtract(5, 'day').toISOString(), category: 'human_ops', linkTo: '/stores/1001'
+    at: now.subtract(5, 'day').toISOString(), category: 'human_ops', linkTo: '/stores/1001', storeId: 1001
   },
   {
     id: 6014,
@@ -1152,13 +1162,13 @@ export const auditLogs: AuditLog[] = [
     id: 6015,
     actor: '运营负责人', action: '添加成本项', entity: '成本', entityId: 'cost_009',
     summary: '添加 拼多多旗舰店 7 月广告预算 ¥5000。',
-    at: now.subtract(2, 'day').toISOString(), category: 'human_ops', linkTo: '/operations'
+    at: now.subtract(2, 'day').toISOString(), category: 'human_ops', linkTo: '/dashboard', storeId: 1001
   },
   {
     id: 6016,
     actor: '李鹏', action: '通过商品草稿', entity: '商品', entityId: 'prod_008',
     summary: '批准 便携式野营炉 上架草稿，自动发布到 淘宝。',
-    at: now.subtract(1, 'day').toISOString(), category: 'human_ops', linkTo: '/operations'
+    at: now.subtract(1, 'day').toISOString(), category: 'human_ops', linkTo: '/dashboard', storeId: 1002
   },
   {
     id: 6017,
@@ -1177,19 +1187,19 @@ export const auditLogs: AuditLog[] = [
     id: 6019,
     actor: 'AllMall 系统', action: '需要重新登录', entity: '店铺', entityId: 1002,
     summary: '淘宝户外用品店登录会话已失效，保活 Agent 正在尝试重新认证。',
-    at: now.subtract(5, 'hour').toISOString(), category: 'store_session', linkTo: '/stores/1002'
+    at: now.subtract(5, 'hour').toISOString(), category: 'store_session', linkTo: '/stores/1002', storeId: 1002
   },
   {
     id: 6020,
     actor: 'AllMall 系统', action: '会话刷新成功', entity: '店铺', entityId: 1003,
     summary: '京东自营店登录会话过期，保活 Agent 自动重新登录成功。',
-    at: now.subtract(1, 'day').toISOString(), category: 'store_session', linkTo: '/stores/1003'
+    at: now.subtract(1, 'day').toISOString(), category: 'store_session', linkTo: '/stores/1003', storeId: 1003
   },
   {
     id: 6021,
     actor: 'AllMall 系统', action: 'Token 额度预警', entity: '模型', entityId: 'model_deepseek',
     summary: 'DeepSeek-chat 模型本月 Token 用量已达 85%，建议关注。',
-    at: now.subtract(2, 'day').toISOString(), category: 'system_event', linkTo: '/billing'
+    at: now.subtract(2, 'day').toISOString(), category: 'system_event', linkTo: '/settings/billing'
   },
   {
     id: 6022,
@@ -1207,13 +1217,15 @@ export const auditLogs: AuditLog[] = [
     id: 6024,
     actor: 'AllMall 系统', action: '熔断触发', entity: '广告计划', entityId: 'campaign_d021',
     summary: '淘宝 户外店广告计划 D-021 花费超预算 130%，自动熔断暂停。',
-    at: now.subtract(3, 'day').toISOString(), category: 'system_event', linkTo: '/agents/risk_control'
+    at: now.subtract(3, 'day').toISOString(), category: 'system_event', linkTo: '/agents/risk_control', storeId: 1002
   },
 ];
 
 export const members: Member[] = [
-  { id: 7001, name: '李鹏', email: 'lipeng@example.com', role: 'Owner', status: 'active' },
-  { id: 7002, name: '运营负责人', email: 'ops@example.com', role: 'Admin', status: 'active' },
+  { id: 7001, name: '李鹏', email: 'lipeng@example.com', role: 'Owner', status: 'active', storeIds: [1001, 1002, 1003] },
+  { id: 7002, name: '运营负责人', email: 'ops@example.com', role: 'Admin', status: 'active', storeIds: [1002, 1003] },
+  // P30.5：店铺维度路由要有真实归属数据，否则只能停留在「按角色找第一个人」。
+  { id: 7004, name: '拼多多店长', email: 'pdd-owner@example.com', role: 'Admin', status: 'active', storeIds: [1001] },
   { id: 7003, name: '风控审批人', email: 'risk@example.com', role: 'Approver', status: 'invited' }
 ];
 
@@ -1263,3 +1275,28 @@ export const approvalPriorApprovals: Record<number, PriorApprovalRecord[]> = {
     }
   ]
 };
+
+/**
+ * P30.5：店铺归属是新增字段，历史持久化的成员表里没有它。
+ * 恢复时按邮箱从种子补齐，避免老账号的店铺维度路由静默退化成「按角色兜底」。
+ */
+const seedMemberStoreIds = new Map(members.map((member) => [member.email, member.storeIds]));
+
+/** 刷新持久化：店铺与成员是经营主体和协作关系，刷新后不能回到种子列表。 */
+registerMockState(
+  'stores',
+  () => ({ stores, members }),
+  (value) => {
+    const data = value as { stores?: Store[]; members?: Member[] } | null;
+    if (!data) return;
+    stores.length = 0;
+    stores.push(...(data.stores ?? []));
+    members.length = 0;
+    members.push(
+      ...(data.members ?? []).map((member) => ({
+        ...member,
+        storeIds: member.storeIds ?? seedMemberStoreIds.get(member.email),
+      })),
+    );
+  },
+);

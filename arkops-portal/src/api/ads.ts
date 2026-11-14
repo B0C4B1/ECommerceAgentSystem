@@ -23,11 +23,37 @@ const creatives: AdCreative[] = [
   { id: 6106, campaignId: 6005, type: 'video', title: '运动鞋 — 跑姿分析', url: 'https://example.com/creatives/c6106.mp4', status: 'approved', performance: { impressions: 180000, clicks: 5400, ctr: 3.0 } },
 ];
 
-const dailyTrend = Array.from({ length: 30 }, (_, i) => ({
-  date: new Date(2026, 7, 1 + i).toISOString(),
-  spend: 300 + Math.random() * 200,
-  revenue: 800 + Math.random() * 800,
-}));
+/**
+ * 固定权重的 30 天曲线：不用 Math.random，刷新页面数字不变；
+ * 权重按活跃计划的 spent / revenue 合计归一化，趋势合计与 getOverview 完全一致。
+ */
+const TREND_WEIGHTS = Array.from({ length: 30 }, (_, i) => {
+  const wave = 0.75 + 0.25 * Math.sin((i / 29) * Math.PI * 2);
+  const ramp = 0.85 + (i / 29) * 0.3;
+  return wave * ramp;
+});
+const TREND_WEIGHT_SUM = TREND_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
+
+/** 按权重拆分总额，把四舍五入的零头补到最后一天，保证合计不差 1。 */
+function allocateByWeight(total: number): number[] {
+  const values = TREND_WEIGHTS.map((weight) => Math.round((total * weight) / TREND_WEIGHT_SUM));
+  const diff = total - values.reduce((sum, value) => sum + value, 0);
+  values[values.length - 1] += diff;
+  return values;
+}
+
+function buildTrend(storeId?: AllMallId) {
+  const active = campaigns.filter((c) => c.status === 'active' && (!storeId || c.storeId === storeId));
+  const spendSeries = allocateByWeight(active.reduce((sum, c) => sum + c.spent, 0));
+  const revenueSeries = allocateByWeight(active.reduce((sum, c) => sum + c.revenue, 0));
+  return spendSeries.map((spend, i) => ({
+    date: new Date(2026, 7, 1 + i).toISOString(),
+    spend,
+    revenue: revenueSeries[i],
+  }));
+}
+
+const dailyTrend = buildTrend();
 
 export const adsApi = {
   list: (filters?: { storeId?: AllMallId; status?: string; platform?: string }) => {
@@ -44,9 +70,9 @@ export const adsApi = {
   },
   getCreatives: (campaignId: AllMallId) =>
     mockDelay(creatives.filter((c) => c.campaignId === campaignId)),
-  getTrend: () => mockDelay(dailyTrend),
-  getOverview: () => {
-    const active = campaigns.filter((c) => c.status === 'active');
+  getTrend: (storeId?: AllMallId) => mockDelay(storeId ? buildTrend(storeId) : dailyTrend),
+  getOverview: (storeId?: AllMallId) => {
+    const active = campaigns.filter((c) => c.status === 'active' && (!storeId || c.storeId === storeId));
     const totalSpend = active.reduce((s, c) => s + c.spent, 0);
     const totalRevenue = active.reduce((s, c) => s + c.revenue, 0);
     const totalImpressions = active.reduce((s, c) => s + c.impressions, 0);

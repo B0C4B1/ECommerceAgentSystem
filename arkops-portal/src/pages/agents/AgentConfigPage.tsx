@@ -24,6 +24,7 @@ import {
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -45,10 +46,12 @@ import {
 } from 'antd';
 import type { UploadFile } from 'antd';
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { agentsApi } from '../../api/agents';
+import { productsApi } from '../../api/products';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
+import { usePermission } from '../../app/usePermission';
 import { AgentLiveConsole } from '../../components/AgentLiveConsole';
 import { AgentOutcomesSection } from '../../components/agents/AgentOutcomesSection';
 import { AgentPreEnableDrawer } from '../../components/agents/AgentPreEnableDrawer';
@@ -56,8 +59,10 @@ import { MetricCard } from '../../components/metrics/MetricCard';
 import { PageHeader } from '../../components/PageHeader';
 import { StatusBadge } from '../../components/StatusBadge';
 import { AgentBuiltinTasksSection, BUILTIN_TASKS } from './AgentBuiltinTasksSection';
+import { exceptionItems } from '../operations/exceptionCenterMockData';
 import { AgentStrategyConfigSection } from './AgentStrategyConfigSection';
 import { AgentConditionalCards } from './AgentConditionalCards';
+import { productDrafts } from './agentConfigMockData';
 import { LoginBootstrapSessionCard } from './LoginBootstrapSessionCard';
 import { ProductLaunchDraftCard } from './ProductLaunchDraftCard';
 import { RecognitionResultCard } from './RecognitionResultCard';
@@ -68,10 +73,26 @@ import { recognitionVariants, type ProductRecognitionResult } from './agentConfi
  * Renders the Agent detail page and coordinates Agent state, task creation, built-in workflows,
  * strategy configuration, active tasks, and historical logs.
  */
+const readonlyFieldsetStyle = { border: 0, padding: 0, margin: 0, minWidth: 0 } as const;
+
+// Draft platform labels use the Chinese display name; stores use platform codes.
+const PLATFORM_BY_LABEL: Record<string, string> = {
+  拼多多: 'pinduoduo',
+  淘宝: 'taobao',
+  抖音: 'douyin',
+  京东: 'jd',
+};
+
 export function AgentConfigPage() {
   const { t } = useI18n();
+  const { can } = usePermission();
+  const canUpdateAgents = can('agents', 'update');
   const { agentType } = useParams<{ agentType: AgentType }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // 待办中心「去处理」会带上 ?exc=<异常 id>，这里把异常上下文带进 Agent 页。
+  const exceptionId = searchParams.get('exc');
+  const focusedException = exceptionId ? exceptionItems.find((item) => item.id === exceptionId) : undefined;
   const queryClient = useQueryClient();
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   // WS-D (D4): shared pre-enable confirmation drawer
@@ -163,6 +184,37 @@ export function AgentConfigPage() {
     },
   });
 
+  // Approving a product draft must land somewhere: create the master product so it
+  // shows up in 商品管理 instead of only removing the task from this page.
+  const approveDraftMutation = useMutation({
+    mutationFn: async (taskId: AllMallId) => {
+      const draft = productDrafts[taskId];
+      const store = stores.find((s) => PLATFORM_BY_LABEL[draft?.platform ?? ''] === s.platform) ?? stores[0];
+      if (!draft || !store) throw new Error(t('agent.approveNoStore'));
+      const product = await productsApi.create({
+        spuCode: `AI-${taskId}`,
+        name: draft.productName,
+        images: [`https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(draft.productName)}&image_size=square`],
+        category: draft.category.split(' > ')[0],
+        cost: draft.costPrice,
+        description: draft.description,
+        totalStock: draft.totalStock,
+        primaryStoreId: store.id,
+      });
+      await agentsApi.completeTask(taskId, `已创建商品 ${product.name}（${product.spuCode}）`);
+      return product;
+    },
+    onSuccess: () => {
+      message.success(t('agent.draftApproved'));
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['agent-tasks', agentType] });
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+    },
+    onError: (error: Error) => {
+      message.error(error.message);
+    },
+  });
+
   const handleStartRecognize = () => {
     if (fileList.length === 0) {
       message.warning(t('agent.uploadHint'));
@@ -205,7 +257,7 @@ export function AgentConfigPage() {
   if (!agent) return <Typography.Text type="danger">{t('agent.notFound')}</Typography.Text>;
 
   const depsMissing = agent.dependsOn.filter((d) => !allAgents.find((a) => a.agentType === d)?.enabled);
-  const switchDisabled = agent.required || depsMissing.length > 0;
+  const switchDisabled = agent.required || depsMissing.length > 0 || !canUpdateAgents;
   const riskControlOn = allAgents.find((a) => a.agentType === 'risk_control')?.enabled === true;
   const riskControlAgent = allAgents.find((a) => a.agentType === 'risk_control');
   const isGuarded =
@@ -274,19 +326,41 @@ export function AgentConfigPage() {
             {depsMissing.length > 0 && (
               <Typography.Text type="danger" style={{ fontSize: 11, display: 'block' }}>
                 {t('agent.dependsOn')}: {depsMissing.map((d) => t(`agent.${d}`)).join(', ')}
-                <Button
-                  size="small" type="link" danger
-                  loading={enableAllDepsMutation.isPending}
-                  onClick={() => enableAllDepsMutation.mutate()}
-                  style={{ padding: '0 4px', fontSize: 11, height: 'auto' }}
-                >
-                  ({t('agent.enableAll')})
-                </Button>
+                {canUpdateAgents && (
+                  <Button
+                    size="small" type="link" danger
+                    loading={enableAllDepsMutation.isPending}
+                    onClick={() => enableAllDepsMutation.mutate()}
+                    style={{ padding: '0 4px', fontSize: 11, height: 'auto' }}
+                  >
+                    ({t('agent.enableAll')})
+                  </Button>
+                )}
               </Typography.Text>
             )}
           </Space>
         }
       />
+
+      {focusedException && (
+        <Alert
+          type={focusedException.level === 'critical' ? 'error' : 'warning'}
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`${t('agent.exceptionContext')}：${focusedException.title} · ${focusedException.storeName}`}
+          description={
+            <Space direction="vertical" size={2}>
+              <span>{focusedException.summary}</span>
+              <span>{t('agent.exceptionSuggestion')}：{focusedException.suggestedAction}</span>
+            </Space>
+          }
+          action={
+            <Button size="small" onClick={() => navigate('/inbox')}>
+              {t('agent.backToInbox')}
+            </Button>
+          }
+        />
+      )}
 
       {/* 运行统计 */}
       {stats && (
@@ -341,48 +415,52 @@ export function AgentConfigPage() {
       </Card>
 
       {/* WS-D (D6): built-in task cards open the task modal pre-filled with the template */}
-      <AgentBuiltinTasksSection
-        agentType={agent.agentType}
-        onTaskSelect={(template) => {
-          setTaskModalOpen(true);
-          if (!isProductLaunch) {
-            taskForm.setFieldsValue({ title: template.title, goal: template.goal });
-            message.success(t('agenttrust.templateApplied', { title: template.title }));
-          }
-        }}
-      />
-      <AgentStrategyConfigSection agent={agent} />
-
-      {/* login_bootstrap 专属：店铺会话状态 */}
-      {isLoginBootstrap && <LoginBootstrapSessionCard stores={stores} />}
-
-      {/* 各 Agent 专属操作卡片 */}
-      <AgentConditionalCards agentType={agentType!} />
-
-      {/* product_launch 专属：商品草稿 */}
-      {isProductLaunch && (
-        <ProductLaunchDraftCard
-          activeTasks={activeTasks}
-          onUploadClick={() => setTaskModalOpen(true)}
-          onRegenerate={(taskId) => {
-            cancelTaskMutation.mutate(taskId);
+      <fieldset disabled={!canUpdateAgents} style={readonlyFieldsetStyle}>
+        <AgentBuiltinTasksSection
+          agentType={agent.agentType}
+          onTaskSelect={(template) => {
             setTaskModalOpen(true);
-          }}
-          onCancel={(taskId) => cancelTaskMutation.mutate(taskId)}
-          onApprove={(taskId) => {
-            cancelTaskMutation.mutate(taskId);
+            if (!isProductLaunch) {
+              taskForm.setFieldsValue({ title: template.title, goal: template.goal });
+              message.success(t('agenttrust.templateApplied', { title: template.title }));
+            }
           }}
         />
-      )}
+        <AgentStrategyConfigSection agent={agent} />
+
+        {/* login_bootstrap 专属：店铺会话状态 */}
+        {isLoginBootstrap && <LoginBootstrapSessionCard stores={stores} />}
+
+        {/* 各 Agent 专属操作卡片 */}
+        <AgentConditionalCards agentType={agentType!} />
+
+        {/* product_launch 专属：商品草稿 */}
+        {isProductLaunch && (
+          <ProductLaunchDraftCard
+            activeTasks={activeTasks}
+            onUploadClick={() => setTaskModalOpen(true)}
+            onRegenerate={() => {
+              // 先打开新建任务，旧任务保留到用户真正提交新任务；关闭弹窗不会误删任务。
+              setTaskModalOpen(true);
+            }}
+            onCancel={(taskId) => cancelTaskMutation.mutate(taskId)}
+            onApprove={(taskId) => {
+              approveDraftMutation.mutate(taskId);
+            }}
+          />
+        )}
+      </fieldset>
 
       {/* 运行中任务 — WS-D (D7): 所有 Agent 统一显示（含取消操作） */}
       {activeTasks.length > 0 && (
         <Card
           title={<><UnorderedListOutlined /> {t('agent.activeTasks')} ({activeTasks.length})</>}
           extra={
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setTaskModalOpen(true)}>
-              {t('agent.newTask')}
-            </Button>
+            canUpdateAgents ? (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setTaskModalOpen(true)}>
+                {t('agent.newTask')}
+              </Button>
+            ) : null
           }
           style={{ marginBottom: 16 }}
         >
@@ -407,22 +485,22 @@ export function AgentConfigPage() {
             columns={[
               {
                 title: t('entity.task'), dataIndex: 'title',
-                render: (title: string) => (
-                  <Typography.Text strong style={{ cursor: 'pointer', color: 'var(--ark-blue)' }}>{title}</Typography.Text>
-                ),
+                render: (title: string) => <Typography.Text strong>{title}</Typography.Text>,
               },
               { title: t('tasks.status'), dataIndex: 'status', width: 120, render: (status: TaskStatus) => <StatusBadge value={status} /> },
               { title: t('tasks.createdAt'), dataIndex: 'createdAt', width: 140, render: (v: string) => new Date(v).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) },
               {
                 title: t('common.actions'), width: 80,
                 render: (_: unknown, record: Task) => (
-                  <Button
-                    size="small" danger icon={<StopOutlined />}
-                    loading={cancelTaskMutation.isPending}
-                    onClick={() => cancelTaskMutation.mutate(record.id)}
-                  >
-                    {t('common.cancel')}
-                  </Button>
+                  canUpdateAgents ? (
+                    <Button
+                      size="small" danger icon={<StopOutlined />}
+                      loading={cancelTaskMutation.isPending}
+                      onClick={() => cancelTaskMutation.mutate(record.id)}
+                    >
+                      {t('common.cancel')}
+                    </Button>
+                  ) : null
                 ),
               },
             ]}
@@ -453,9 +531,11 @@ export function AgentConfigPage() {
         <Card style={{ marginBottom: 16 }}>
           <div style={{ textAlign: 'center', padding: 16 }}>
             <Typography.Paragraph type="secondary">{t('agent.noActiveTasks')}</Typography.Paragraph>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setTaskModalOpen(true)}>
-              {isProductLaunch ? t('agent.uploadProduct') : t('agent.newTask')}
-            </Button>
+            {canUpdateAgents && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setTaskModalOpen(true)}>
+                {isProductLaunch ? t('agent.uploadProduct') : t('agent.newTask')}
+              </Button>
+            )}
           </div>
         </Card>
       )}
