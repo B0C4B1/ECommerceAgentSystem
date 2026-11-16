@@ -32,10 +32,10 @@ export function CreativeLibraryCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #ea580c' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-orange)' }}
       title={
         <Space>
-          <PictureOutlined style={{ color: '#ea580c' }} />
+          <PictureOutlined style={{ color: 'var(--ark-orange)' }} />
           {t('creative.libraryTitle')}
           <Badge status="processing" />
           <Tag color="orange" style={{ fontSize: 11 }}>{t('creative.lastGen')}: {lastGen}</Tag>
@@ -76,7 +76,7 @@ export function CreativeLibraryCard() {
                   <Tag color="purple" style={{ fontSize: 10 }}>{creative.size}</Tag>
                   <Tag color="blue" style={{ fontSize: 10 }}>{creative.tone}</Tag>
                 </Space>
-                <Typography.Paragraph style={{ fontSize: 11, margin: '6px 0', color: '#64748b', whiteSpace: 'pre-line', marginBottom: 0 }}>
+                <Typography.Paragraph style={{ fontSize: 11, margin: '6px 0', color: 'var(--ark-muted)', whiteSpace: 'pre-line', marginBottom: 0 }}>
                   {creative.copy}
                 </Typography.Paragraph>
                 <Space size="small" style={{ marginTop: 8 }}>
@@ -138,7 +138,7 @@ export function CreativeLibraryCard() {
             <Space>
               {previewCreative.colors.map((color, i) => (
                 <div key={i} style={{ textAlign: 'center' }}>
-                  <div style={{ width: 48, height: 48, borderRadius: 6, background: color, border: '1px solid #e2e8f0' }} />
+                  <div style={{ width: 48, height: 48, borderRadius: 6, background: color, border: '1px solid var(--ark-border)' }} />
                   <Typography.Text type="secondary" style={{ fontSize: 10 }}>{color}</Typography.Text>
                 </div>
               ))}

@@ -65,6 +65,7 @@ import { usePermission } from '../../app/usePermission';
 import { PageFilterBar } from '../../components/filters/PageFilterBar';
 import { MetricCard } from '../../components/metrics/MetricCard';
 import { PageHeader } from '../../components/PageHeader';
+import { TablePageSkeleton } from '../../components/PageSkeleton';
 import { EmptyState } from '../../components/EmptyState';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import { DataTableCard } from '../../components/table/DataTableCard';
@@ -146,9 +147,16 @@ export function OrderAutomationPage() {
   const [digestExpanded, setDigestExpanded] = useState(false);
 
   // ---- Data layer ----------------------------------------------------------
-  const { data: orders = [] } = useQuery({ queryKey: ['orders'], queryFn: ordersApi.list });
-  const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: storesApi.list });
-  const { data: syncResult } = useQuery({ queryKey: ['orderSync'], queryFn: ordersApi.getSyncResult });
+  // U6.1: the page's whole headline is "N 单中，AI 已自动履约 M 单". Reading `data` only
+  // (defaulting to []) made the first ~300ms of every visit say "0 单中 · 暂无需要你处理的
+  // 订单" — a wrong verdict, not a loading state. The three queries below are now read with
+  // their lifecycle so the page can show "读取中 / 读不出来" instead of an empty conclusion.
+  const ordersQuery = useQuery({ queryKey: ['orders'], queryFn: ordersApi.list, retry: 1 });
+  const { data: orders = [] } = ordersQuery;
+  const storesQuery = useQuery({ queryKey: ['stores'], queryFn: storesApi.list, retry: 1 });
+  const { data: stores = [] } = storesQuery;
+  const syncQuery = useQuery({ queryKey: ['orderSync'], queryFn: ordersApi.getSyncResult, retry: 1 });
+  const { data: syncResult } = syncQuery;
   const storeNamesById = useMemo(() => new Map(stores.map((s) => [s.id, s.name])), [stores]);
   const storeNameOf = (order: Order) => storeNamesById.get(order.storeId) ?? '-';
 
@@ -402,6 +410,31 @@ export function OrderAutomationPage() {
       <div className="page-stack">
         <PageHeader title={t('order.title')} description={t('order.description')} />
         <StoreConnectionEmptyState description={t('ordersv2.onboardingEmpty')} />
+      </div>
+    );
+  }
+
+  // U6.1 三态之一：读取中。骨架只说明「正在读」，不替人下「没有订单」的结论。
+  if (ordersQuery.isLoading || syncQuery.isLoading || storesQuery.isLoading) {
+    return <TablePageSkeleton />;
+  }
+
+  // U6.1 三态之二：读取失败。明确「不是没有订单」，并就地重试，不用刷新整页。
+  if (ordersQuery.isError || syncQuery.isError || storesQuery.isError) {
+    return (
+      <div className="page-stack">
+        <PageHeader title={t('order.title')} description={t('order.description')} />
+        <Card size="small">
+          <EmptyState
+            description={t('ordersv2.loadFailed')}
+            actionText={t('ordersv2.loadRetry')}
+            onAction={() => {
+              void ordersQuery.refetch();
+              void syncQuery.refetch();
+              void storesQuery.refetch();
+            }}
+          />
+        </Card>
       </div>
     );
   }

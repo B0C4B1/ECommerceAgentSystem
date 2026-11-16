@@ -87,7 +87,7 @@ export function PromotionList({ campaigns, stores, products }: Props) {
       render: (_: unknown, r: PromotionCampaign) => (
         <Space direction="vertical" size={0}>
           <Typography.Text style={{ fontSize: 12 }}>{formatCurrency(r.spent)} / {formatCurrency(r.budget)}</Typography.Text>
-          <Progress percent={r.budget > 0 ? +(r.spent / r.budget * 100).toFixed(0) : 0} size="small" showInfo={false} strokeColor={r.spent / r.budget > 0.8 ? '#ff4d4f' : '#52c41a'} />
+          <Progress percent={r.budget > 0 ? +(r.spent / r.budget * 100).toFixed(0) : 0} size="small" showInfo={false} strokeColor={r.spent / r.budget > 0.8 ? 'var(--ark-red)' : 'var(--ark-green)'} />
         </Space>
       ),
     },
@@ -100,7 +100,7 @@ export function PromotionList({ campaigns, stores, products }: Props) {
     {
       title: 'ROI', key: 'roi', width: 70, align: 'right',
       render: (_: unknown, r: PromotionCampaign) => (
-        <Typography.Text strong style={{ color: r.roi >= 5 ? 'var(--ark-green)' : r.roi >= 3 ? '#faad14' : 'var(--ark-red)' }}>
+        <Typography.Text strong style={{ color: r.roi >= 5 ? 'var(--ark-green)' : r.roi >= 3 ? 'var(--ark-amber)' : 'var(--ark-red)' }}>
           {r.roi > 0 ? `${r.roi}x` : '-'}
         </Typography.Text>
       ),

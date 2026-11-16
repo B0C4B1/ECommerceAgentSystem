@@ -383,7 +383,7 @@ export function StoreGoalCard({ storeId }: StoreGoalCardProps) {
       style={{ marginBottom: 16 }}
       title={
         <Space>
-          <AimOutlined style={{ color: '#2563eb' }} />
+          <AimOutlined style={{ color: 'var(--ark-blue)' }} />
           <Typography.Text strong>{t('goal.cardTitle')}</Typography.Text>
           <Tag color="blue">{t('goal.generalTemplate')}</Tag>
         </Space>
@@ -423,7 +423,7 @@ export function StoreGoalCard({ storeId }: StoreGoalCardProps) {
                 {formatGoalValue(goal.metric, goal.current)} / {formatGoalValue(goal.metric, goal.target)}
               </Typography.Text>
             </Space>
-            <Progress percent={percent} strokeColor="#2563eb" />
+            <Progress percent={percent} strokeColor="var(--ark-blue)" />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {t('goal.progress', { percent })}
             </Typography.Text>
@@ -589,7 +589,7 @@ export function StoreGoalCard({ storeId }: StoreGoalCardProps) {
               {/* P32.2：Agent 给建议值 + 依据 + 预演后果；人只决定要不要带入。 */}
               <Space size={6} wrap style={{ marginTop: 2 }}>
                 <Typography.Text
-                  style={{ fontSize: 12, color: item.advice.suggested === null ? undefined : '#2563eb' }}
+                  style={{ fontSize: 12, color: item.advice.suggested === null ? undefined : 'var(--ark-blue)' }}
                   type={item.advice.suggested === null ? 'secondary' : undefined}
                 >
                   <RobotOutlined style={{ marginRight: 4 }} />
@@ -745,8 +745,9 @@ export function StoreGoalCard({ storeId }: StoreGoalCardProps) {
                     {guardImpact && (
                       <div
                         style={{
-                          background: '#fff',
-                          border: '1px dashed #fdba74',
+                          // 影响预估是橙色虚线提示框：底色走面板色、描边由 --ark-orange 混出，暗色下不再是白底。
+                          background: 'var(--ark-panel)',
+                          border: '1px dashed color-mix(in srgb, var(--ark-orange) 45%, var(--ark-panel))',
                           borderRadius: 6,
                           padding: '8px 10px',
                         }}

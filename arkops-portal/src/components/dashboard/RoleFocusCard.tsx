@@ -16,7 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button, Card, Col, Row, Space, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { approvalsApi } from '../../api/approvals';
 import { compareEscalationPriority, exceptionsApi, routeEscalation, summarizeImpact } from '../../api/exceptions';
 import { orchestratorApi } from '../../api/orchestrator';
@@ -66,6 +66,9 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
   const { t } = useI18n();
   const { role } = useAuth();
   const { stores, isAllStores } = useStoreScope();
+  // 跳转由按钮自己发起：`<Link><Button/></Link>` 会让一个动作占两次 Tab 停靠，
+  // 且焦点落在外层 <a> 上没有任何可见指示（U3.1）。
+  const navigate = useNavigate();
 
   // 只有这三类职责有明确的首要动作；Finance / Viewer 不造入口。
   // Admin 是 Agent 路由升级的实际承接人（店铺日常异常），首屏给升级队列而不是目标编辑。
@@ -98,9 +101,9 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
 
   const storeNameOf = (storeId: number) => stores.find((store) => store.id === storeId)?.name ?? `#${storeId}`;
   const roleTag = {
-    owner: { label: t('roleFocus.ownerRoleTag'), color: 'blue', icon: <AimOutlined style={{ color: '#2563eb' }} />, title: t('roleFocus.ownerTitle'), hint: t('roleFocus.ownerHint') },
-    operator: { label: t(`member.role.${role}`), color: 'orange', icon: <AlertOutlined style={{ color: '#ea580c' }} />, title: t('roleFocus.operatorTitle'), hint: t('roleFocus.operatorHint') },
-    approver: { label: t('roleFocus.approverRoleTag'), color: 'purple', icon: <AuditOutlined style={{ color: '#7c3aed' }} />, title: t('roleFocus.approverTitle'), hint: t('roleFocus.approverHint') },
+    owner: { label: t('roleFocus.ownerRoleTag'), color: 'blue', icon: <AimOutlined style={{ color: 'var(--ark-blue)' }} />, title: t('roleFocus.ownerTitle'), hint: t('roleFocus.ownerHint') },
+    operator: { label: t(`member.role.${role}`), color: 'orange', icon: <AlertOutlined style={{ color: 'var(--ark-orange)' }} />, title: t('roleFocus.operatorTitle'), hint: t('roleFocus.operatorHint') },
+    approver: { label: t('roleFocus.approverRoleTag'), color: 'purple', icon: <AuditOutlined style={{ color: 'var(--ark-purple)' }} />, title: t('roleFocus.approverTitle'), hint: t('roleFocus.approverHint') },
   }[focus];
 
   let stats: { label: string; value: ReactNode; hint?: string }[] = [];
@@ -149,11 +152,9 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
         >
           {multiStore ? t('roleFocus.adjustAccountGoal') : t('roleFocus.adjustGoal')}
         </Button>
-        <Link to="/setup">
-          <Button size="small" type="primary">
-            {t('roleFocus.delegation')}
-          </Button>
-        </Link>
+        <Button size="small" type="primary" onClick={() => navigate('/setup')}>
+          {t('roleFocus.delegation')}
+        </Button>
       </Space>
     );
   }
@@ -191,14 +192,12 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
       : t('roleFocus.operatorEmpty');
     actions = (
       <Space size={8} wrap>
-        <Link to="/inbox">
-          <Button size="small" type="primary">
-            {t('roleFocus.openAll')}
-          </Button>
-        </Link>
-        <Link to="/inbox?mine=1">
-          <Button size="small">{t('roleFocus.openMine')}</Button>
-        </Link>
+        <Button size="small" type="primary" onClick={() => navigate('/inbox')}>
+          {t('roleFocus.openAll')}
+        </Button>
+        <Button size="small" onClick={() => navigate('/inbox?mine=1')}>
+          {t('roleFocus.openMine')}
+        </Button>
       </Space>
     );
   }
@@ -245,14 +244,12 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
       : t('roleFocus.approverEmpty');
     actions = (
       <Space size={8} wrap>
-        <Link to="/inbox?type=approval">
-          <Button size="small" type="primary">
-            {t('roleFocus.openApprovals')}
-          </Button>
-        </Link>
-        <Link to="/agents/approvals">
-          <Button size="small">{t('roleFocus.allApprovals')}</Button>
-        </Link>
+        <Button size="small" type="primary" onClick={() => navigate('/inbox?type=approval')}>
+          {t('roleFocus.openApprovals')}
+        </Button>
+        <Button size="small" onClick={() => navigate('/agents/approvals')}>
+          {t('roleFocus.allApprovals')}
+        </Button>
       </Space>
     );
   }

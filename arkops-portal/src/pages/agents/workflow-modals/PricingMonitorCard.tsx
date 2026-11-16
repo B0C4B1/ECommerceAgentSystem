@@ -94,10 +94,10 @@ export function PricingMonitorCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #16a34a' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-green)' }}
       title={
         <Space>
-          <PayCircleOutlined style={{ color: '#16a34a' }} />
+          <PayCircleOutlined style={{ color: 'var(--ark-green)' }} />
           {t('pricing.monitorTitle')}
           <Badge status="processing" />
           <Tag color="green" style={{ fontSize: 11 }}>{t('pricing.lastScan')}: {lastScan}</Tag>

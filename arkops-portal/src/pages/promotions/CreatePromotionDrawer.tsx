@@ -129,7 +129,7 @@ export function CreatePromotionDrawer({ open, onClose, onCreate, loading, stores
           />
         </Form.Item>
 
-        <div style={{ padding: '8px 12px', background: 'var(--ark-bg-sink)', borderRadius: 6, marginTop: -8 }}>
+        <div style={{ padding: '8px 12px', background: 'var(--ark-panel-soft)', borderRadius: 6, marginTop: -8 }}>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {t('promotions.createHint')}
           </Typography.Text>

@@ -44,7 +44,7 @@ import {
   message,
 } from 'antd';
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { agentsApi } from '../../api/agents';
 import {
   AUTONOMY_MIN_DECIDED,
@@ -103,6 +103,7 @@ const AUTONOMY_LEVELS: AutonomyLevel[] = ['L1', 'L2', 'L3'];
 export function SetupConfigPage() {
   const { t } = useI18n();
   const { can } = usePermission();
+  const navigate = useNavigate();
   const canUpdateSetup = can('setup', 'update');
   const canCreateStore = can('stores', 'create');
   const queryClient = useQueryClient();
@@ -313,9 +314,9 @@ export function SetupConfigPage() {
         description={t('scenario.pageDesc')}
         actions={
           canCreateStore ? (
-            <Link to="/stores/onboarding?journey=import">
-              <Button type="primary" icon={<PlusOutlined />}>{t('setup.addStore')}</Button>
-            </Link>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/stores/onboarding?journey=import')}>
+              {t('setup.addStore')}
+            </Button>
           ) : undefined
         }
       />

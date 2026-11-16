@@ -139,10 +139,10 @@ export function RiskScannerCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #dc2626' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-red)' }}
       title={
         <Space>
-          <SafetyOutlined style={{ color: '#dc2626' }} />
+          <SafetyOutlined style={{ color: 'var(--ark-red)' }} />
           {t('risk.scannerTitle')}
           <Badge status="processing" />
           <Tag color="red" style={{ fontSize: 11 }}>{t('risk.lastScan')}: {lastScan}</Tag>

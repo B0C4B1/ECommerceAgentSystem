@@ -8,13 +8,51 @@
  *
  * Main exports:
  * - MetricCard: renders a consistent metric card around Ant Design Statistic.
+ * - StatTile: renders a page-header stat tile with fixed label/value/helper rhythm.
  *
  * Major updates:
  * - 2026-07-03: Added ownership and function documentation for AI-assisted collaboration.
+ * - 2026-11-16: Added StatTile so header stat blocks share one size and type scale.
  */
 import { Card, Statistic, Typography } from 'antd';
 import type { StatisticProps } from 'antd';
 import type { CSSProperties, ReactNode } from 'react';
+
+export type StatTone = 'default' | 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'orange' | 'muted';
+
+interface StatTileProps {
+  label: ReactNode;
+  value: ReactNode;
+  /** 数值语义色，只映射到 tokens，不接受裸色值。 */
+  tone?: StatTone;
+  icon?: ReactNode;
+  helper?: ReactNode;
+  badge?: ReactNode;
+  footer?: ReactNode;
+}
+
+/**
+ * Renders one page-header stat block with the shared label/value/helper rhythm.
+ * Numbers get the same grouping antd Statistic used to provide.
+ */
+export function StatTile({ label, value, tone = 'default', icon, helper, badge, footer }: StatTileProps) {
+  const text = typeof value === 'number' ? value.toLocaleString('en-US') : value;
+  return (
+    <Card size="small" className={`stat-tile stat-tile-${tone}`}>
+      <div className="stat-tile-head">
+        <span className="stat-tile-label">
+          {/* 固定占位：有/无图标的方块标签左缘保持同一条竖线 */}
+          <span className="stat-tile-icon">{icon}</span>
+          {label}
+        </span>
+        {badge ? <span className="stat-tile-badge">{badge}</span> : null}
+      </div>
+      <div className="stat-tile-value">{text}</div>
+      {helper ? <div className="stat-tile-helper">{helper}</div> : null}
+      {footer ? <div className="stat-tile-footer">{footer}</div> : null}
+    </Card>
+  );
+}
 
 interface MetricCardProps {
   title: ReactNode;

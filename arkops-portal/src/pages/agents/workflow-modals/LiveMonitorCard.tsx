@@ -84,10 +84,10 @@ export function LiveMonitorCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #ea580c' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-orange)' }}
       title={
         <Space>
-          <VideoCameraOutlined style={{ color: '#ea580c' }} />
+          <VideoCameraOutlined style={{ color: 'var(--ark-orange)' }} />
           {t('live.monitorTitle')}
           <Badge status="processing" />
           <Tag color="orange" style={{ fontSize: 11 }}>{t('live.lastSync')}: {lastSync}</Tag>
@@ -107,22 +107,22 @@ export function LiveMonitorCard() {
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col xs={12} sm={6}>
           <Card size="small" style={{ textAlign: 'center' }}>
-            <Statistic title={t('live.viewers')} value={mockLiveMetrics.viewers} valueStyle={{ fontSize: 22, color: '#ea580c' }} />
+            <Statistic title={t('live.viewers')} value={mockLiveMetrics.viewers} valueStyle={{ fontSize: 22, color: 'var(--ark-orange)' }} />
           </Card>
         </Col>
         <Col xs={12} sm={6}>
           <Card size="small" style={{ textAlign: 'center' }}>
-            <Statistic title={t('live.orders')} value={totalOrders} valueStyle={{ fontSize: 22, color: '#2563eb' }} />
+            <Statistic title={t('live.orders')} value={totalOrders} valueStyle={{ fontSize: 22, color: 'var(--ark-blue)' }} />
           </Card>
         </Col>
         <Col xs={12} sm={6}>
           <Card size="small" style={{ textAlign: 'center' }}>
-            <Statistic title="GMV" value={mockLiveMetrics.gmv} prefix="¥" valueStyle={{ fontSize: 22, color: '#16a34a' }} />
+            <Statistic title="GMV" value={mockLiveMetrics.gmv} prefix="¥" valueStyle={{ fontSize: 22, color: 'var(--ark-green)' }} />
           </Card>
         </Col>
         <Col xs={12} sm={6}>
           <Card size="small" style={{ textAlign: 'center' }}>
-            <Statistic title={t('live.conversionRate')} value={mockLiveMetrics.conversionRate} suffix="%" valueStyle={{ fontSize: 22, color: '#16a34a' }} />
+            <Statistic title={t('live.conversionRate')} value={mockLiveMetrics.conversionRate} suffix="%" valueStyle={{ fontSize: 22, color: 'var(--ark-green)' }} />
           </Card>
         </Col>
       </Row>

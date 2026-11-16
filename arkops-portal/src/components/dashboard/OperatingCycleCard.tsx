@@ -127,7 +127,7 @@ function ConflictArbitrationRow({
     <Alert
       type={decided ? (conflict.decision === 'override' ? 'success' : 'info') : 'warning'}
       showIcon
-      style={highlighted ? { boxShadow: '0 0 0 2px #1677ff', borderRadius: 8 } : undefined}
+      style={highlighted ? { boxShadow: '0 0 0 2px var(--ark-blue)', borderRadius: 8 } : undefined}
       message={
         <Space size={6} wrap>
           <span>{t(`cycle.conflictType_${conflict.type}`, { target: conflict.targetLabel })}</span>
@@ -605,7 +605,7 @@ export function OperatingCycleCard({
   const proposalRow = (proposal: CycleProposal) => (
     <div
       key={proposal.id}
-      style={{ borderBottom: '1px solid var(--ark-border-soft, #eef2f7)', paddingBottom: 10 }}
+      style={{ borderBottom: '1px solid var(--ark-border-soft)', paddingBottom: 10 }}
     >
       <Space size={6} wrap>
         <Typography.Text strong>{proposal.targetLabel}</Typography.Text>
@@ -656,7 +656,7 @@ export function OperatingCycleCard({
       <div
         key={collaboration.id}
         style={{
-          border: '1px solid var(--ark-border-soft, #eef2f7)',
+          border: '1px solid var(--ark-border-soft)',
           borderRadius: 8,
           padding: 10,
         }}
@@ -706,7 +706,7 @@ export function OperatingCycleCard({
   const outcomeRow = (outcome: GoalOutcome) => (
     <div
       key={outcome.id}
-      style={{ borderBottom: '1px solid var(--ark-border-soft, #eef2f7)', paddingBottom: 8 }}
+      style={{ borderBottom: '1px solid var(--ark-border-soft)', paddingBottom: 8 }}
     >
       <Space size={6} wrap>
         <Typography.Text strong>{outcome.targetLabel}</Typography.Text>

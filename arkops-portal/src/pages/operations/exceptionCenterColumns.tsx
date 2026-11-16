@@ -63,7 +63,7 @@ export function createExceptionColumns(t: TFunction, handlers: ExceptionColumnHa
       width: 110,
       render: (type: ExceptionType, record: ExceptionItem) => {
         const icons: Record<string, JSX.Element> = {
-          critical: <ExclamationCircleOutlined style={{ color: 'var(--ark-red, #dc2626)', fontSize: 14 }} />,
+          critical: <ExclamationCircleOutlined style={{ color: 'var(--ark-red)', fontSize: 14 }} />,
           warning: <AlertOutlined style={{ color: 'var(--ark-orange)', fontSize: 14 }} />,
           info: <BellOutlined style={{ color: 'var(--ark-blue)', fontSize: 14 }} />,
         };

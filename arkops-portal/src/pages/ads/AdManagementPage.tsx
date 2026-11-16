@@ -16,6 +16,7 @@ import { useI18n } from '../../app/i18n';
 import { useStoreScope } from '../../app/storeScope';
 import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
+import { StatTile } from '../../components/metrics/MetricCard';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import { TrendBarChart } from '../../components/charts/TrendBarChart';
 import type { AdCampaign, AdCreative, AllMallId, Store } from '../../types/domain';
@@ -82,7 +83,7 @@ export function AdManagementPage() {
       render: (_: unknown, r: AdCampaign) => (
         <Space direction="vertical" size={0}>
           <Typography.Text style={{ fontSize: 12 }}>{formatCurrency(r.spent)} / {formatCurrency(r.budget)}</Typography.Text>
-          <Progress percent={r.budget > 0 ? +(r.spent / r.budget * 100).toFixed(0) : 0} size="small" showInfo={false} strokeColor={r.spent / r.budget > 0.9 ? '#ff4d4f' : '#1890ff'} />
+          <Progress percent={r.budget > 0 ? +(r.spent / r.budget * 100).toFixed(0) : 0} size="small" showInfo={false} strokeColor={r.spent / r.budget > 0.9 ? 'var(--ark-red)' : 'var(--ark-blue)'} />
         </Space>
       ),
     },
@@ -95,7 +96,7 @@ export function AdManagementPage() {
     {
       title: 'ROI', key: 'roi', width: 60, align: 'right',
       render: (_: unknown, r: AdCampaign) => (
-        <Typography.Text strong style={{ color: r.roi >= 3 ? 'var(--ark-green)' : r.roi >= 1.5 ? '#faad14' : 'var(--ark-red)' }}>
+        <Typography.Text strong style={{ color: r.roi >= 3 ? 'var(--ark-green)' : r.roi >= 1.5 ? 'var(--ark-amber)' : 'var(--ark-red)' }}>
           {r.roi > 0 ? `${r.roi}x` : '-'}
         </Typography.Text>
       ),
@@ -120,13 +121,13 @@ export function AdManagementPage() {
       <PageHeader title={t('nav.ads')} description={t('ads.subtitle')} />
 
       {/* Stats */}
-      <Row gutter={[12, 12]} style={{ padding: '0 24px', marginBottom: 12 }}>
-        <Col xs={12} sm={4}><Card size="small"><Statistic title={t('ads.activeCount')} value={active} valueStyle={{ color: 'var(--ark-green)', fontSize: 20 }} /></Card></Col>
-        <Col xs={12} sm={4}><Card size="small"><Statistic title={t('ads.totalSpend')} value={formatCurrency(overview?.totalSpend ?? 0)} /></Card></Col>
-        <Col xs={12} sm={4}><Card size="small"><Statistic title={t('ads.totalRevenue')} value={formatCurrency(overview?.totalRevenue ?? 0)} /></Card></Col>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('ads.impressions')} value={formatNum(overview?.totalImpressions ?? 0)} /></Card></Col>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('ads.avgRoi')} value={`${overview?.avgRoi ?? 0}x`} valueStyle={{ color: 'var(--ark-purple)', fontSize: 20 }} /></Card></Col>
-      </Row>
+      <div className="stat-grid stat-grid-5" style={{ padding: '0 24px' }}>
+        <StatTile label={t('ads.activeCount')} value={active} tone="green" />
+        <StatTile label={t('ads.totalSpend')} value={formatCurrency(overview?.totalSpend ?? 0)} />
+        <StatTile label={t('ads.totalRevenue')} value={formatCurrency(overview?.totalRevenue ?? 0)} />
+        <StatTile label={t('ads.impressions')} value={formatNum(overview?.totalImpressions ?? 0)} />
+        <StatTile label={t('ads.avgRoi')} value={`${overview?.avgRoi ?? 0}x`} tone="purple" />
+      </div>
 
       {/* Content */}
       <Tabs defaultActiveKey="campaigns" style={{ flex: 1, padding: '0 24px', overflow: 'auto' }} tabBarStyle={{ marginBottom: 12 }}
@@ -153,8 +154,8 @@ export function AdManagementPage() {
                     key: d.date,
                     label: d.date.slice(5),
                     bars: [
-                      { value: d.spend, title: `${t('ads.spend')}: ¥${Math.round(d.spend)}`, color: '#1890ff' },
-                      { value: d.revenue, title: `${t('ads.revenue')}: ¥${Math.round(d.revenue)}`, color: '#52c41a' },
+                      { value: d.spend, title: `${t('ads.spend')}: ¥${Math.round(d.spend)}`, color: 'var(--ark-blue)' },
+                      { value: d.revenue, title: `${t('ads.revenue')}: ¥${Math.round(d.revenue)}`, color: 'var(--ark-green)' },
                     ],
                   }))}
                 />

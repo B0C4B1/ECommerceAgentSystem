@@ -36,9 +36,9 @@ const mockNewProducts = [
 ];
 
 const trendConfig = {
-  rising: { color: '#16a34a', icon: <RiseOutlined /> },
-  stable: { color: '#64748b', icon: <MinusOutlined /> },
-  declining: { color: '#dc2626', icon: <ArrowDownOutlined /> },
+  rising: { color: 'green', icon: <RiseOutlined /> },
+  stable: { color: 'default', icon: <MinusOutlined /> },
+  declining: { color: 'red', icon: <ArrowDownOutlined /> },
 };
 
 export function CompetitorIntelCard() {
@@ -106,7 +106,7 @@ export function CompetitorIntelCard() {
     {
       title: t('intel.opportunityScore'), dataIndex: 'opportunityScore', width: 120,
       render: (v: number) => {
-        const color = v >= 75 ? '#16a34a' : v >= 50 ? '#f59e0b' : '#dc2626';
+        const color = v >= 75 ? 'var(--ark-green)' : v >= 50 ? 'var(--ark-amber)' : 'var(--ark-red)';
         return <Progress percent={v} size="small" strokeColor={color} format={(p) => <span style={{ fontSize: 12, color }}>{p}</span>} />;
       },
     },
@@ -121,7 +121,7 @@ export function CompetitorIntelCard() {
       title: t('intl.searchVolume'), dataIndex: 'searchVolume', width: 140,
       render: (v: number) => {
         const w = Math.min(v / 156000 * 100, 100);
-        return <Space><div style={{ width: 60, height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${w}%`, height: '100%', background: '#2563eb' }} /></div><Typography.Text type="secondary" style={{ fontSize: 11 }}>{(v / 1000).toFixed(0)}k</Typography.Text></Space>;
+        return <Space><div style={{ width: 60, height: 6, background: 'var(--ark-border)', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${w}%`, height: '100%', background: 'var(--ark-blue)' }} /></div><Typography.Text type="secondary" style={{ fontSize: 11 }}>{(v / 1000).toFixed(0)}k</Typography.Text></Space>;
       },
     },
     {
@@ -149,10 +149,10 @@ export function CompetitorIntelCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #7c3aed' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-purple)' }}
       title={
         <Space>
-          <RadarChartOutlined style={{ color: '#7c3aed' }} />
+          <RadarChartOutlined style={{ color: 'var(--ark-purple)' }} />
           {t('intel.snapshotTitle')}
           <Badge status="processing" />
           <Tag color="purple" style={{ fontSize: 11 }}>{t('intel.lastCollect')}: {lastCollect}</Tag>
@@ -185,7 +185,7 @@ export function CompetitorIntelCard() {
               <Row gutter={[12, 12]}>
                 {mockProductResearch.map(r => (
                   <Col xs={24} sm={12} key={r.id}>
-                    <Card size="small" style={{ borderLeft: `3px solid ${r.opportunityScore >= 75 ? '#16a34a' : r.opportunityScore >= 50 ? '#f59e0b' : '#dc2626'}` }}>
+                    <Card size="small" style={{ borderLeft: `3px solid ${r.opportunityScore >= 75 ? 'var(--ark-green)' : r.opportunityScore >= 50 ? 'var(--ark-amber)' : 'var(--ark-red)'}` }}>
                       <Space direction="vertical" size={4} style={{ width: '100%' }}>
                         <Space style={{ justifyContent: 'space-between', width: '100%' }}>
                           <Typography.Text strong style={{ fontSize: 13 }}>{r.category}</Typography.Text>

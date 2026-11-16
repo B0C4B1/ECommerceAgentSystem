@@ -192,6 +192,7 @@ function SyncDigestCard({
   t: TranslateFn;
   canRecheck?: boolean;
 }) {
+  const navigate = useNavigate();
   const hasRun = !!result;
   const failed = result?.status === 'failed';
   const autoCount = result?.autoApplied.length ?? 0;
@@ -240,9 +241,7 @@ function SyncDigestCard({
           <Typography.Text type={failed ? 'danger' : undefined} style={{ fontSize: 13 }}>{feedback}</Typography.Text>
         </Space>
         {!failed && pendingCount > 0 && (
-          <Link to="/inbox">
-            <Button size="small" type="link">{t('products.goToInboxAction')}</Button>
-          </Link>
+          <Button size="small" type="link" onClick={() => navigate('/inbox')}>{t('products.goToInboxAction')}</Button>
         )}
       </div>
       {troubledStores.length > 0 && (

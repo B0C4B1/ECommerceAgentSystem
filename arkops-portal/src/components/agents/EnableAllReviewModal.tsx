@@ -31,9 +31,9 @@ interface EnableAllReviewModalProps {
 const RISK_ORDER: RiskLevel[] = ['high', 'medium', 'low'];
 
 const RISK_META: Record<RiskLevel, { color: string; labelKey: string }> = {
-  high: { color: '#dc2626', labelKey: 'agenttrust.riskGroupHigh' },
-  medium: { color: '#ea580c', labelKey: 'agenttrust.riskGroupMedium' },
-  low: { color: '#16a34a', labelKey: 'agenttrust.riskGroupLow' },
+  high: { color: 'var(--ark-red)', labelKey: 'agenttrust.riskGroupHigh' },
+  medium: { color: 'var(--ark-orange)', labelKey: 'agenttrust.riskGroupMedium' },
+  low: { color: 'var(--ark-green)', labelKey: 'agenttrust.riskGroupLow' },
 };
 
 export function EnableAllReviewModal({
@@ -80,7 +80,7 @@ export function EnableAllReviewModal({
   return (
     <Modal
       open={open}
-      title={<><ThunderboltOutlined style={{ marginRight: 8, color: '#7c3aed' }} />{title}</>}
+      title={<><ThunderboltOutlined style={{ marginRight: 8, color: 'var(--ark-purple)' }} />{title}</>}
       width={640}
       okText={t('agenttrust.enableSelected', { count: selected.size })}
       okButtonProps={{ disabled: selected.size === 0 }}

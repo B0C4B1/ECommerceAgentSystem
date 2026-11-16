@@ -240,11 +240,17 @@ function clearWizardState() {
   }
 }
 
+/*
+ * 平台品牌色（拼多多红 / 淘宝橙 / 京东红）是品牌识别色，双主题下必须保持不变，
+ * 故此处放行裸 hex；头像底色用品牌色混 --ark-panel 派生，暗色下不会出现白块。
+ */
+/* hex-audit-off */
 const platforms: PlatformOption[] = [
-  { key: 'pinduoduo', name: '拼多多', short: '拼', color: '#e02e24', soft: '#fff1f0', description: '拼多多商家后台' },
-  { key: 'taobao', name: '淘宝', short: '淘', color: '#ff6a00', soft: '#fff7e6', description: '千牛商家工作台' },
-  { key: 'jd', name: '京东', short: '京', color: '#e1251b', soft: '#fff1f0', description: '京麦商家中心' },
+  { key: 'pinduoduo', name: '拼多多', short: '拼', color: '#e02e24', soft: 'color-mix(in srgb, #e02e24 10%, var(--ark-panel))', description: '拼多多商家后台' },
+  { key: 'taobao', name: '淘宝', short: '淘', color: '#ff6a00', soft: 'color-mix(in srgb, #ff6a00 12%, var(--ark-panel))', description: '千牛商家工作台' },
+  { key: 'jd', name: '京东', short: '京', color: '#e1251b', soft: 'color-mix(in srgb, #e1251b 10%, var(--ark-panel))', description: '京麦商家中心' },
 ];
+/* hex-audit-on */
 
 /**
  * Platforms with a real, gateway-backed login (docs/integration/pdd-login-method2.md — the
@@ -705,7 +711,7 @@ export function StoreOnboardingPage() {
       ),
     },
     { title: '原售价', dataIndex: 'sourcePrice', width: 90, render: (value: number) => `¥${value.toFixed(2)}` },
-    { title: '建议售价', dataIndex: 'targetPrice', width: 100, render: (value: number) => <Typography.Text strong style={{ color: '#2563eb' }}>¥{value.toFixed(2)}</Typography.Text> },
+    { title: '建议售价', dataIndex: 'targetPrice', width: 100, render: (value: number) => <Typography.Text strong style={{ color: 'var(--ark-blue)' }}>¥{value.toFixed(2)}</Typography.Text> },
     {
       // A6: use the same "暂不支持迁移" label as the summary cards for blocked items.
       title: '检查结果', dataIndex: 'status', width: 120,
@@ -994,7 +1000,7 @@ export function StoreOnboardingPage() {
                 options={platforms.filter(item => item.key !== sourcePlatform).map(item => ({ label: item.name, value: item.key }))}
               />
               {targetAuthorized ? (
-                <div className="onboarding-target-status"><CheckCircleFilled style={{ color: '#16a34a' }} /> {t('storewizard.targetAuthorized')} · 上架前仍需你确认</div>
+                <div className="onboarding-target-status"><CheckCircleFilled style={{ color: 'var(--ark-green)' }} /> {t('storewizard.targetAuthorized')} · 上架前仍需你确认</div>
               ) : (
                 <>
                   {/* A6: the target store must be authorized before drafts can be written to it. */}
@@ -1068,7 +1074,7 @@ export function StoreOnboardingPage() {
             <Divider type="vertical" />
             <div><Typography.Text type="secondary">预计生成草稿</Typography.Text><Typography.Title level={2}>{Math.round(selectedCount * 0.94).toLocaleString()}</Typography.Title></div>
             <Divider type="vertical" />
-            <div><Typography.Text type="secondary">预计需人工补充</Typography.Text><Typography.Title level={2} style={{ color: '#ea580c' }}>{Math.round(selectedCount * 0.06)}</Typography.Title></div>
+            <div><Typography.Text type="secondary">预计需人工补充</Typography.Text><Typography.Title level={2} style={{ color: 'var(--ark-orange)' }}>{Math.round(selectedCount * 0.06)}</Typography.Title></div>
           </Card>
         </div>
       );
@@ -1113,9 +1119,9 @@ export function StoreOnboardingPage() {
             <Typography.Paragraph type="secondary">系统已转换类目和属性，并根据目标平台行情生成建议售价。</Typography.Paragraph>
           </div>
           <Row gutter={[12, 12]} className="onboarding-check-stats">
-            <Col span={8}><Card><Typography.Text type="secondary">可直接创建草稿</Typography.Text><Typography.Title level={2} style={{ color: '#16a34a' }}>{readyCount}</Typography.Title><Progress percent={89} showInfo={false} strokeColor="#16a34a" /></Card></Col>
-            <Col span={8}><Card><Typography.Text type="secondary">需要补充信息</Typography.Text><Typography.Title level={2} style={{ color: '#ea580c' }}>{Math.round(selectedCount * 0.09)}</Typography.Title><Progress percent={9} showInfo={false} strokeColor="#ea580c" /></Card></Col>
-            <Col span={8}><Card><Typography.Text type="secondary">暂不支持迁移</Typography.Text><Typography.Title level={2} style={{ color: '#dc2626' }}>{Math.round(selectedCount * 0.02)}</Typography.Title><Progress percent={2} showInfo={false} strokeColor="#dc2626" /></Card></Col>
+            <Col span={8}><Card><Typography.Text type="secondary">可直接创建草稿</Typography.Text><Typography.Title level={2} style={{ color: 'var(--ark-green)' }}>{readyCount}</Typography.Title><Progress percent={89} showInfo={false} strokeColor="var(--ark-green)" /></Card></Col>
+            <Col span={8}><Card><Typography.Text type="secondary">需要补充信息</Typography.Text><Typography.Title level={2} style={{ color: 'var(--ark-orange)' }}>{Math.round(selectedCount * 0.09)}</Typography.Title><Progress percent={9} showInfo={false} strokeColor="var(--ark-orange)" /></Card></Col>
+            <Col span={8}><Card><Typography.Text type="secondary">暂不支持迁移</Typography.Text><Typography.Title level={2} style={{ color: 'var(--ark-red)' }}>{Math.round(selectedCount * 0.02)}</Typography.Title><Progress percent={2} showInfo={false} strokeColor="var(--ark-red)" /></Card></Col>
           </Row>
           <Card title="商品转换预览" extra={<Typography.Text type="secondary">{t('storewizard.previewShownHint', { total: selectedCount.toLocaleString() })}</Typography.Text>}>
             <Table columns={previewColumns} dataSource={previewRows} pagination={false} size="small" scroll={{ x: 840 }} />
@@ -1149,9 +1155,9 @@ export function StoreOnboardingPage() {
         {publishProgress === 100 && (
           <>
             <Row gutter={[12, 12]} className="onboarding-result-grid">
-              <Col span={8}><Card size="small"><Typography.Text type="secondary">成功创建</Typography.Text><Typography.Title level={3} style={{ color: '#16a34a' }}>{Math.round(selectedCount * 0.94)}</Typography.Title></Card></Col>
-              <Col span={8}><Card size="small"><Typography.Text type="secondary">等待补充</Typography.Text><Typography.Title level={3} style={{ color: '#ea580c' }}>{Math.round(selectedCount * 0.04)}</Typography.Title></Card></Col>
-              <Col span={8}><Card size="small"><Typography.Text type="secondary">平台拒绝</Typography.Text><Typography.Title level={3} style={{ color: '#dc2626' }}>{Math.round(selectedCount * 0.02)}</Typography.Title></Card></Col>
+              <Col span={8}><Card size="small"><Typography.Text type="secondary">成功创建</Typography.Text><Typography.Title level={3} style={{ color: 'var(--ark-green)' }}>{Math.round(selectedCount * 0.94)}</Typography.Title></Card></Col>
+              <Col span={8}><Card size="small"><Typography.Text type="secondary">等待补充</Typography.Text><Typography.Title level={3} style={{ color: 'var(--ark-orange)' }}>{Math.round(selectedCount * 0.04)}</Typography.Title></Card></Col>
+              <Col span={8}><Card size="small"><Typography.Text type="secondary">平台拒绝</Typography.Text><Typography.Title level={3} style={{ color: 'var(--ark-red)' }}>{Math.round(selectedCount * 0.02)}</Typography.Title></Card></Col>
             </Row>
             {/* A6: rejected items get an explanation and a remediation path. */}
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('storewizard.rejectedHint')}</Typography.Text>
@@ -1252,7 +1258,7 @@ export function StoreOnboardingPage() {
             <div>
               <Tag color={journey === 'import' ? 'blue' : 'purple'}>{journey === 'import' ? '已有店铺导入' : '跨平台商品迁移'}</Tag>
               <Typography.Title level={4}>{journey === 'import' ? '同步店铺数据' : '复制到新平台'}</Typography.Title>
-              <Progress percent={overallProgress} showInfo={false} strokeColor={journey === 'import' ? '#2563eb' : '#7c3aed'} />
+              <Progress percent={overallProgress} showInfo={false} strokeColor={journey === 'import' ? 'var(--ark-blue)' : 'var(--ark-purple)'} />
               <div className="onboarding-aside-eta">第 {step + 1} / {steps.length} 步 · 进度自动保存</div>
             </div>
             <Steps direction="vertical" current={step} items={steps} size="small" />

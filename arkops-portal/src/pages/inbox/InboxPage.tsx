@@ -37,6 +37,7 @@ import type { CSSProperties } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { approvalPolicyApi } from '../../api/approvalPolicies';
 import { approvalsApi } from '../../api/approvals';
+import { auditLogsApi } from '../../api/auditLogs';
 import { exceptionsApi, compareEscalationPriority, routeEscalation, summarizeImpact } from '../../api/exceptions';
 import type { ExceptionItem } from '../../api/exceptions';
 import { orchestratorApi } from '../../api/orchestrator';
@@ -50,6 +51,7 @@ import { useStoreScope } from '../../app/storeScope';
 import { usePermission } from '../../app/usePermission';
 import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
+import { TablePageSkeleton } from '../../components/PageSkeleton';
 import { ProductThumb } from '../../components/products/ProductThumb';
 import { StatusBadge } from '../../components/StatusBadge';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
@@ -58,7 +60,7 @@ import { getSlaState, isOrderActionable } from '../../utils/orderSla';
 import { EXCEPTION_ORDER_STATUSES } from '../../types/domain';
 import { ApprovalDecisionModal, type ApprovalDecision } from '../approvals/ApprovalDecisionModal';
 import { InboxHistoryTab } from './InboxHistoryTab';
-import { InboxAutoHandledTab } from './InboxAutoHandledTab';
+import { InboxAutoHandledTab, AUTO_HANDLED_WINDOW_DAYS, getAutoHandledRows } from './InboxAutoHandledTab';
 import { settingsApi } from '../../api/settings';
 import type { EscalationDecisionOption, EscalationTimeoutAction } from '../operations/exceptionCenterMockData';
 import {
@@ -191,7 +193,7 @@ function FieldConflictComparison({ conflict, t }: { conflict: FieldConflict; t: 
   });
 
   return (
-    <div style={{ marginBottom: 4 }}>
+    <div style={{ flex: '2 1 240px', minWidth: 0, marginBottom: 4 }}>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t(FIELD_LABEL_KEYS[conflict.field])}：</Typography.Text>
       <Space size={8} wrap style={{ marginTop: 2 }}>
         <div>
@@ -377,11 +379,15 @@ export function InboxPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const { data: approvals = [] } = useQuery({ queryKey: ['approvals'], queryFn: approvalsApi.list });
+  // U6.3：会生成待办条目的查询必须持有引用，才能区分「还没读到 / 读不出来 / 真的没有」。
+  // 失败重试收到 1 次（与 /orders、/agents 同口径），约 1s 内把「读不出来」交给用户。
+  const approvalsQuery = useQuery({ queryKey: ['approvals'], queryFn: approvalsApi.list, retry: 1 });
+  const approvals = approvalsQuery.data ?? [];
   // D9: the approval policy table left the inbox — the question it answered ("why does
   // this need me?") is answered on the item itself instead.
   const { data: approvalPolicies = [] } = useQuery({ queryKey: ['approval-policies'], queryFn: approvalPolicyApi.list });
-  const { data: exceptions = [] } = useQuery({ queryKey: ['exceptions'], queryFn: exceptionsApi.list });
+  const exceptionsQuery = useQuery({ queryKey: ['exceptions'], queryFn: exceptionsApi.list, retry: 1 });
+  const exceptions = exceptionsQuery.data ?? [];
   // P30.5：指派对象来自在册成员（含角色），不再用一份与成员表无关的硬编码名单。
   const { data: teamMembers = [] } = useQuery({ queryKey: ['members'], queryFn: settingsApi.members });
   // P30.3：人沉淀的决策规则，抽屉里可查、可撤销。
@@ -394,13 +400,24 @@ export function InboxPage() {
     queryKey: ['storeTakeovers'],
     queryFn: async () => exceptionsApi.listTakeovers(),
   });
-  const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: storesApi.list });
-  const { data: orders = [] } = useQuery({ queryKey: ['orders'], queryFn: ordersApi.list });
-  const { data: productListings = [] } = useQuery({ queryKey: ['productListings'], queryFn: productListingsApi.list });
-  const { data: products = [] } = useQuery({ queryKey: ['products'], queryFn: productsApi.list });
-  const { data: newProductCandidates = [] } = useQuery({ queryKey: ['newProductCandidates'], queryFn: newProductCandidatesApi.list });
-  const { data: mergeSuggestions = [] } = useQuery({ queryKey: ['productMergeSuggestions'], queryFn: mergeSuggestionsApi.list });
-  const { data: fieldConflicts = [] } = useQuery({ queryKey: ['fieldConflicts'], queryFn: fieldConflictsApi.list });
+  const storesQuery = useQuery({ queryKey: ['stores'], queryFn: storesApi.list, retry: 1 });
+  const stores = storesQuery.data ?? [];
+  const ordersQuery = useQuery({ queryKey: ['orders'], queryFn: ordersApi.list, retry: 1 });
+  const orders = ordersQuery.data ?? [];
+  const productListingsQuery = useQuery({ queryKey: ['productListings'], queryFn: productListingsApi.list, retry: 1 });
+  const productListings = productListingsQuery.data ?? [];
+  const productsQuery = useQuery({ queryKey: ['products'], queryFn: productsApi.list, retry: 1 });
+  const products = productsQuery.data ?? [];
+  const newProductCandidatesQuery = useQuery({ queryKey: ['newProductCandidates'], queryFn: newProductCandidatesApi.list, retry: 1 });
+  const newProductCandidates = newProductCandidatesQuery.data ?? [];
+  const mergeSuggestionsQuery = useQuery({ queryKey: ['productMergeSuggestions'], queryFn: mergeSuggestionsApi.list, retry: 1 });
+  const mergeSuggestions = mergeSuggestionsQuery.data ?? [];
+  const fieldConflictsQuery = useQuery({ queryKey: ['fieldConflicts'], queryFn: fieldConflictsApi.list, retry: 1 });
+  const fieldConflicts = fieldConflictsQuery.data ?? [];
+  // U1.3：第三问「系统替我做了什么」要在首屏就能答，不必先切到「自动处理」。
+  // 与 tab 内容共用 getAutoHandledRows，徽标数字与点进去的行数同源。
+  const auditLogsQuery = useQuery({ queryKey: ['audit-logs'], queryFn: auditLogsApi.list, retry: 1 });
+  const auditLogs = auditLogsQuery.data ?? [];
 
   // P16：跨店方案与单店升级项在同一个入口拍板。Dashboard 只保留预算与待拍板摘要，
   // 决策动作全部收敛到这里，避免出现两套裁决面板。
@@ -711,10 +728,33 @@ export function InboxPage() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     }
   });
+  // U2.2：批量忽略可撤回。沿用历史页「恢复」语义（exceptionsApi.unignore），
+  // 把刚忽略的条目放回待处理，回执写明恢复条数，便于和列表行数对账。
+  const restoreBatchIgnored = async (ids: string[]) => {
+    await Promise.all(ids.map((id) => exceptionsApi.unignore(id)));
+    queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    message.success(t('inbox.batchIgnoreUndone', { count: ids.length }));
+  };
   const batchIgnoreMutation = useMutation({
     mutationFn: (ids: string[]) => exceptionsApi.batchIgnore(ids),
     onSuccess: (_data, ids) => {
-      message.success(t('inbox.batchIgnoreDone', { count: ids.length }));
+      message.success({
+        content: (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            {t('inbox.batchIgnoreDone', { count: ids.length })}
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto', fontSize: 12 }}
+              onClick={() => void restoreBatchIgnored(ids)}
+            >
+              {t('inbox.restore')}
+            </Button>
+          </span>
+        ),
+        duration: 8,
+      });
       setSelectedExceptionIds([]);
       queryClient.invalidateQueries({ queryKey: ['exceptions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -1083,6 +1123,10 @@ export function InboxPage() {
     return { ...byKind, all: entriesInScope.length };
   }, [entriesInScope]);
 
+  // U1.3：三问里的第三问——「系统替我做了什么」——在首屏就给出条数。
+  // 与「自动处理」tab 的内容同源（getAutoHandledRows），点进去行数一定对得上。
+  const autoHandledCount = useMemo(() => getAutoHandledRows(auditLogs).length, [auditLogs]);
+
   const visibleEntries = filter === 'all'
     ? entriesInScope
     : filter === 'product'
@@ -1212,6 +1256,43 @@ export function InboxPage() {
     );
   }
 
+  // U6.3 三态之一：读取中。待办条目由这些查询拼出来，任一未返回都只能说「正在读」，
+  // 不能渲染 tab 计数、空态文案或「系统替你处理了 0 项」。
+  const entryQueries = [
+    approvalsQuery,
+    exceptionsQuery,
+    storesQuery,
+    ordersQuery,
+    productListingsQuery,
+    productsQuery,
+    newProductCandidatesQuery,
+    mergeSuggestionsQuery,
+    fieldConflictsQuery
+  ];
+  if (entryQueries.some((query) => query.isLoading) || auditLogsQuery.isLoading) {
+    return <TablePageSkeleton />;
+  }
+
+  // U6.3 三态之二：读取失败。明确「不是没有待办」，就地重试失败的查询，不用刷新整页。
+  if (entryQueries.some((query) => query.isError)) {
+    return (
+      <div className="page-stack">
+        <PageHeader title={t('inbox.title')} description={t('inbox.description')} />
+        <Card size="small">
+          <EmptyState
+            description={t('inbox.loadFailed')}
+            actionText={t('inbox.loadRetry')}
+            onAction={() => {
+              entryQueries.forEach((query) => {
+                if (query.isError) void query.refetch();
+              });
+            }}
+          />
+        </Card>
+      </div>
+    );
+  }
+
   const renderQuickActions = (entry: InboxEntry) => {
     if (entry.kind === 'approval' && entry.approval) {
       const approval = entry.approval;
@@ -1237,9 +1318,14 @@ export function InboxPage() {
               </Button>
             </>
           )}
-          <Link to={`/agents/approvals/${approval.id}`}>
-            <Button size="small" type="link" style={{ padding: '0 4px' }}>{t('inbox.viewDetail')}</Button>
-          </Link>
+          <Button
+            size="small"
+            type="link"
+            style={{ padding: '0 4px' }}
+            onClick={() => navigate(`/agents/approvals/${approval.id}`)}
+          >
+            {t('inbox.viewDetail')}
+          </Button>
         </Space>
       );
     }
@@ -1613,6 +1699,30 @@ export function InboxPage() {
         )}
       />
 
+      {/* U6.3：自动处理回执读不出来时单独说明，不因此把待办队列藏起来，
+          也不让「自动处理」看起来像系统什么都没做。 */}
+      {auditLogsQuery.isError && (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+            padding: '8px 10px',
+            border: '1px solid var(--ark-border-soft)',
+            borderRadius: 6,
+            background: 'var(--ark-panel-soft)'
+          }}
+        >
+          <AlertOutlined style={{ color: 'var(--ark-orange)' }} />
+          <Typography.Text style={{ fontSize: 12 }}>{t('inbox.autoLoadFailed')}</Typography.Text>
+          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => void auditLogsQuery.refetch()}>
+            {t('inbox.autoLoadRetry')}
+          </Button>
+        </div>
+      )}
+
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
@@ -1663,7 +1773,8 @@ export function InboxPage() {
                 {t('inbox.selectedCount', { count: selectedExceptionIds.length })}
               </Typography.Text>
               <Popconfirm
-                title={t('inbox.batchResolve')}
+                title={t('inbox.batchResolveConfirmTitle', { count: selectedExceptionIds.length })}
+                description={t('inbox.batchResolveConfirmBody')}
                 onConfirm={() => batchResolveMutation.mutate(selectedExceptionIds)}
                 okText={t('common.confirm')}
                 cancelText={t('common.cancel')}
@@ -1673,7 +1784,8 @@ export function InboxPage() {
                 </Button>
               </Popconfirm>
               <Popconfirm
-                title={t('inbox.batchIgnore')}
+                title={t('inbox.batchIgnoreConfirmTitle', { count: selectedExceptionIds.length })}
+                description={t('inbox.batchIgnoreConfirmBody')}
                 onConfirm={() => batchIgnoreMutation.mutate(selectedExceptionIds)}
                 okText={t('common.confirm')}
                 cancelText={t('common.cancel')}
@@ -1888,11 +2000,13 @@ export function InboxPage() {
                               : <Tag color="orange" style={{ margin: 0 }}>{t('inbox.expiringTag', { days: entry.expiresInDays })}</Tag>
                           )}
                         </Space>
-                        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                        {/* 1024 下标题与摘要同处一行会把标题压成单字竖排（U4.2.1）：
+                            给两者写明 flex 基准，空间不足时摘要换行到标题下方。 */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-start' }}>
                           {entry.kind === 'product_draft' && entry.product && (
                             <div style={{ flexShrink: 0 }}><ProductThumb src={entry.product.images[0]} size={48} /></div>
                           )}
-                          <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ flex: '1 1 200px', minWidth: 0 }}>
                           {entry.kind === 'approval' && entry.approval ? (
                             <Link to={`/agents/approvals/${entry.approval.id}`}>
                               <Typography.Text strong>{entry.title}</Typography.Text>
@@ -1906,7 +2020,7 @@ export function InboxPage() {
                         ) : (
                           <Typography.Paragraph
                             type="secondary"
-                            style={{ marginBottom: 4, fontSize: 12 }}
+                            style={{ flex: '2 1 240px', minWidth: 0, marginBottom: 4, fontSize: 12 }}
                             ellipsis={{ rows: 2 }}
                           >
                             {entry.summary}
@@ -2040,7 +2154,32 @@ export function InboxPage() {
             // Reads as a sequence with the other two: what needs me → what the system
             // did for me → what I decided.
             key: 'auto',
-            label: <span><ThunderboltOutlined /> {t('inbox.tabAuto')}</span>,
+            label: (
+              <span
+                title={
+                  autoHandledCount > 0
+                    ? t('inbox.tabAutoCountHint', { days: AUTO_HANDLED_WINDOW_DAYS, count: autoHandledCount })
+                    : undefined
+                }
+              >
+                <ThunderboltOutlined /> {t('inbox.tabAuto')}
+                {/* 计数徽标与「待处理」同形不同色：中性描边只报数、不催促，红色才代表要动。
+                    底色/文字/描边全部取 token，亮暗两套主题下都能看清胶囊形状。 */}
+                {autoHandledCount > 0 && (
+                  <Badge
+                    count={autoHandledCount}
+                    size="small"
+                    offset={[6, -4]}
+                    style={{
+                      marginLeft: 6,
+                      backgroundColor: 'var(--ark-panel)',
+                      color: 'var(--ark-muted)',
+                      boxShadow: 'inset 0 0 0 1px var(--ark-muted)'
+                    }}
+                  />
+                )}
+              </span>
+            ),
             children: <InboxAutoHandledTab onShowPending={() => setActiveTab('pending')} onCheckEscalation={setHistoryException} />,
           },
           {
@@ -2325,7 +2464,7 @@ export function InboxPage() {
                     </Space>
                     <div
                       style={{
-                        borderTop: '1px dashed var(--ark-border-soft, #eef2f7)',
+                        borderTop: '1px dashed var(--ark-border-soft)',
                         paddingTop: 8,
                       }}
                     >

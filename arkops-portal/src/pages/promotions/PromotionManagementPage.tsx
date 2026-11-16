@@ -8,7 +8,7 @@ import {
   CalendarOutlined, FireOutlined, PlusOutlined, RobotOutlined,
   ScheduleOutlined, ThunderboltOutlined, UnorderedListOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Card, Col, Row, Segmented, Select, Space, Switch, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Segmented, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import { promotionsApi } from '../../api/promotions';
 import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
@@ -16,6 +16,7 @@ import { useStoreScope } from '../../app/storeScope';
 import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
+import { StatTile } from '../../components/metrics/MetricCard';
 import { CalendarView } from './CalendarView';
 import { CreatePromotionDrawer } from './CreatePromotionDrawer';
 import type { PromotionDefaults } from './CreatePromotionDrawer';
@@ -169,7 +170,7 @@ export function PromotionManagementPage() {
               <RobotOutlined style={{ marginRight: 4 }} />{t('promotions.aiSuggestions')}：
             </Typography.Text>
             {aiSuggestions.map((s, i) => (
-              <Card key={i} size="small" style={{ background: 'var(--ark-bg-sink)' }}>
+              <Card key={i} size="small" style={{ background: 'var(--ark-panel-soft)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                   <div>
                     <Space size={4}>
@@ -195,23 +196,13 @@ export function PromotionManagementPage() {
       </Card>
 
       {/* Stats */}
-      <Row gutter={[12, 12]} style={{ padding: '0 24px', marginBottom: 12 }}>
-        <Col xs={12} sm={4}>
-          <Card size="small"><StatBox icon={<FireOutlined style={{ color: '#ff4d4f' }} />} label={t('promotions.active')} value={stats?.active ?? 0} color="#ff4d4f" /></Card>
-        </Col>
-        <Col xs={12} sm={4}>
-          <Card size="small"><StatBox icon={<ScheduleOutlined style={{ color: '#faad14' }} />} label={t('promotions.scheduled')} value={stats?.scheduled ?? 0} color="#faad14" /></Card>
-        </Col>
-        <Col xs={12} sm={4}>
-          <Card size="small"><StatBox icon={<ThunderboltOutlined style={{ color: 'var(--ark-text-tertiary)' }} />} label={t('promotions.ended')} value={stats?.ended ?? 0} color="var(--ark-text-tertiary)" /></Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card size="small"><StatBox icon={null} label={t('promotions.totalRevenue')} value={formatCurrency(stats?.totalRevenue ?? 0)} color="var(--ark-purple)" /></Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card size="small"><StatBox icon={null} label={t('promotions.avgRoi')} value={`${stats?.totalRoi ?? 0}x`} color="var(--ark-green)" /></Card>
-        </Col>
-      </Row>
+      <div className="stat-grid stat-grid-5" style={{ padding: '0 24px' }}>
+        <StatTile icon={<FireOutlined />} label={t('promotions.active')} value={stats?.active ?? 0} tone="red" />
+        <StatTile icon={<ScheduleOutlined />} label={t('promotions.scheduled')} value={stats?.scheduled ?? 0} tone="amber" />
+        <StatTile icon={<ThunderboltOutlined />} label={t('promotions.ended')} value={stats?.ended ?? 0} tone="muted" />
+        <StatTile label={t('promotions.totalRevenue')} value={formatCurrency(stats?.totalRevenue ?? 0)} tone="purple" />
+        <StatTile label={t('promotions.avgRoi')} value={`${stats?.totalRoi ?? 0}x`} tone="green" />
+      </div>
 
       {/* Active campaign alert */}
       {activeCount > 0 && (
@@ -284,16 +275,6 @@ export function PromotionManagementPage() {
         products={products}
         defaults={createDefaults}
       />
-    </div>
-  );
-}
-
-function StatBox({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number | string; color: string }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ marginBottom: 4 }}>{icon}</div>
-      <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{label}</Typography.Text>
-      <Typography.Text strong style={{ fontSize: 20, color }}>{value}</Typography.Text>
     </div>
   );
 }

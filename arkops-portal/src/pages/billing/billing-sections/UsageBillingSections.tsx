@@ -12,7 +12,7 @@ import dayjs from 'dayjs';
 import { financeApi } from '../../../api/finance';
 import { useI18n } from '../../../app/i18n';
 import { TrendBarChart } from '../../../components/charts/TrendBarChart';
-import { MetricCard } from '../../../components/metrics/MetricCard';
+import { StatTile } from '../../../components/metrics/MetricCard';
 import type { BillingRecord } from '../../../types/domain';
 
 function formatCurrency(value: number) {
@@ -46,73 +46,64 @@ export function FinanceSummary({ onSwitchToSubscription }: { onSwitchToSubscript
   const nextBillDate = computeNextBillDate(pendingRecord?.dueDate);
 
   return (
-    <Row gutter={[12, 12]} style={{ marginBottom: 20 }}>
-      <Col xs={24} sm={12} lg={4}>
-        <Card style={{ height: '100%', borderTop: '3px solid #2563eb' }} bodyStyle={{ padding: '16px 20px' }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('finance.currentPlanLabel')}</Typography.Text>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-            <CrownOutlined style={{ color: '#2563eb' }} />
-            <Typography.Text strong style={{ fontSize: 18, color: '#2563eb' }}>{currentPlan?.tier ?? '-'}</Typography.Text>
-          </div>
-          <Typography.Link onClick={onSwitchToSubscription} style={{ fontSize: 11, marginTop: 4, display: 'inline-block' }}>
+    <div className="stat-grid stat-grid-6">
+      <StatTile
+        icon={<CrownOutlined />}
+        label={t('finance.currentPlanLabel')}
+        value={currentPlan?.tier ?? '-'}
+        tone="blue"
+        footer={
+          <Typography.Link onClick={onSwitchToSubscription}>
             {t('finance.manageSubscription')} →
           </Typography.Link>
-        </Card>
-      </Col>
-      <Col xs={12} sm={6} lg={4}>
-        <MetricCard
-          title={t('finance.monthlyFee')}
-          value={currentBill?.total ?? 0}
-          prefix="¥"
-          precision={2}
-          valueStyle={{ color: '#2563eb', fontWeight: 'bold', fontSize: 20 }}
-          helper={`${t('finance.baseFee')} ¥${currentBill?.baseSubscription ?? 0}`}
-        />
-      </Col>
-      <Col xs={12} sm={6} lg={4}>
-        <MetricCard
-          title={t('billingv2.projectedTotal')}
-          value={projectedTotal}
-          prefix="¥"
-          precision={2}
-          valueStyle={{ color: '#7c3aed', fontWeight: 'bold', fontSize: 20 }}
-          helper={t('billingv2.projectedHelper')}
-        />
-      </Col>
-      <Col xs={12} sm={6} lg={4}>
-        <MetricCard
-          title={t('finance.usagePercent')}
-          value={usage ? Math.round((usage.agentCalls.used / usage.agentCalls.limit) * 100) : 0}
-          suffix="%"
-          valueStyle={{ color: usage && usage.agentCalls.used > usage.agentCalls.limit ? '#dc2626' : '#16a34a', fontWeight: 'bold', fontSize: 20 }}
-        >
+        }
+      />
+      <StatTile
+        label={t('finance.monthlyFee')}
+        value={formatCurrency(currentBill?.total ?? 0)}
+        tone="blue"
+        helper={`${t('finance.baseFee')} ${formatCurrency(currentBill?.baseSubscription ?? 0)}`}
+      />
+      <StatTile
+        label={t('billingv2.projectedTotal')}
+        value={formatCurrency(projectedTotal)}
+        tone="purple"
+        helper={t('billingv2.projectedHelper')}
+      />
+      <StatTile
+        label={t('finance.usagePercent')}
+        value={`${usage ? Math.round((usage.agentCalls.used / usage.agentCalls.limit) * 100) : 0}%`}
+        tone={usage && usage.agentCalls.used > usage.agentCalls.limit ? 'red' : 'green'}
+        footer={
           <Progress
             percent={usage ? Math.min(Math.round((usage.agentCalls.used / usage.agentCalls.limit) * 100), 100) : 0}
             size="small"
-            strokeColor={usage && usage.agentCalls.used > usage.agentCalls.limit ? '#dc2626' : '#2563eb'}
+            showInfo={false}
+            strokeColor={usage && usage.agentCalls.used > usage.agentCalls.limit ? 'var(--ark-red)' : 'var(--ark-blue)'}
           />
-        </MetricCard>
-      </Col>
-      <Col xs={12} sm={6} lg={4}>
-        <MetricCard
-          title={t('finance.savedAmount')}
-          value={analysis?.estimatedSaving.savedAmount ?? 0}
-          prefix="¥"
-          valueStyle={{ color: '#16a34a', fontWeight: 'bold', fontSize: 20 }}
-          helper={t('finance.savedShort')}
-        />
-      </Col>
-      <Col xs={12} sm={6} lg={4}>
-        <MetricCard
-          title={t('subscription.nextBillDate')}
-          value={nextBillDate}
-          valueStyle={{ color: '#ea580c', fontWeight: 'bold', fontSize: 18 }}
-          helper={t('billingv2.nextBillHelper')}
-        >
-          <Tag color={pendingRecord ? 'orange' : 'default'} style={{ marginTop: 4 }}>{pendingRecord ? t('finance.status_pending') : t('finance.noPending')}</Tag>
-        </MetricCard>
-      </Col>
-    </Row>
+        }
+      />
+      <StatTile
+        label={t('finance.savedAmount')}
+        value={formatCurrency(analysis?.estimatedSaving.savedAmount ?? 0)}
+        tone="green"
+        helper={t('finance.savedShort')}
+      />
+      <StatTile
+        label={t('subscription.nextBillDate')}
+        value={nextBillDate}
+        tone="orange"
+        badge={
+          <Tag
+            color={pendingRecord ? 'orange' : 'default'}
+            style={{ marginInlineEnd: 0, padding: '0 6px', fontSize: 11, lineHeight: '16px' }}
+          >
+            {pendingRecord ? t('finance.status_pending') : t('finance.noPending')}
+          </Tag>
+        }
+        helper={t('billingv2.nextBillHelper')}
+      />
+    </div>
   );
 }
 
@@ -125,7 +116,7 @@ export function OverageRateSection() {
   const columns: ColumnsType<{ key: string; label: string; included: string; rate: string }> = [
     { title: t('billingv2.rateItem'), dataIndex: 'label' },
     { title: t('billingv2.includedInPlan'), dataIndex: 'included' },
-    { title: t('billingv2.overageRate'), dataIndex: 'rate', render: (v: string) => <Typography.Text strong style={{ color: '#ea580c' }}>{v}</Typography.Text> }
+    { title: t('billingv2.overageRate'), dataIndex: 'rate', render: (v: string) => <Typography.Text strong style={{ color: 'var(--ark-orange)' }}>{v}</Typography.Text> }
   ];
 
   return (
@@ -152,10 +143,10 @@ export function UsageSection() {
 
   // WS-F F3: plan limits drawn on every metered trend (token limit converted to K).
   const metrics = [
-    { key: 'agentCalls' as const, label: t('finance.agentCalls'), color: '#2563eb', limit: usage?.agentCalls.limit, limitText: usage ? `${usage.agentCalls.limit} 次` : undefined },
-    { key: 'tokenUsage' as const, label: t('finance.tokenUsage'), color: '#7c3aed', limit: usage ? usage.tokenUsage.limit / 1000 : undefined, limitText: usage ? `${usage.tokenUsage.limit / 1000}K` : undefined },
-    { key: 'browserSessions' as const, label: t('finance.browserSessions'), color: '#0f766e', limit: usage?.browserSessions.limit, limitText: usage ? `${usage.browserSessions.limit} 个` : undefined },
-    { key: 'stores' as const, label: t('subscription.stores'), color: '#ea580c', limit: usage?.stores.limit, limitText: usage ? `${usage.stores.limit} 个` : undefined }
+    { key: 'agentCalls' as const, label: t('finance.agentCalls'), color: 'var(--ark-blue)', limit: usage?.agentCalls.limit, limitText: usage ? `${usage.agentCalls.limit} 次` : undefined },
+    { key: 'tokenUsage' as const, label: t('finance.tokenUsage'), color: 'var(--ark-purple)', limit: usage ? usage.tokenUsage.limit / 1000 : undefined, limitText: usage ? `${usage.tokenUsage.limit / 1000}K` : undefined },
+    { key: 'browserSessions' as const, label: t('finance.browserSessions'), color: 'var(--ark-teal)', limit: usage?.browserSessions.limit, limitText: usage ? `${usage.browserSessions.limit} 个` : undefined },
+    { key: 'stores' as const, label: t('subscription.stores'), color: 'var(--ark-orange)', limit: usage?.stores.limit, limitText: usage ? `${usage.stores.limit} 个` : undefined }
   ];
 
   return (
@@ -194,7 +185,7 @@ export function UsageSection() {
                           value,
                           max: scaleMax,
                           title: `${m.label}: ${value}${m.key === 'tokenUsage' ? 'K' : ''}${overLimit ? ` · ${t('billingv2.overLimit')}` : ''}`,
-                          color: overLimit ? '#dc2626' : m.color,
+                          color: overLimit ? 'var(--ark-red)' : m.color,
                           minHeight: 10,
                           width: 18
                         }
@@ -257,10 +248,10 @@ export function BillingSection() {
           <Col xs={12} sm={6}><Statistic title={t('finance.baseFee')} value={currentBill.baseSubscription} prefix="¥" valueStyle={{ fontSize: 16 }} /></Col>
           {currentBill.overageItems.map((item, idx) => (
             <Col xs={12} sm={6} key={idx}>
-              <Statistic title={item.description} value={item.amount} prefix="¥" precision={2} valueStyle={{ fontSize: 16, color: '#ea580c' }} />
+              <Statistic title={item.description} value={item.amount} prefix="¥" precision={2} valueStyle={{ fontSize: 16, color: 'var(--ark-orange)' }} />
             </Col>
           ))}
-          <Col xs={12} sm={6}><Statistic title={t('finance.total')} value={currentBill.total} prefix="¥" valueStyle={{ fontSize: 20, color: '#2563eb', fontWeight: 'bold' }} /></Col>
+          <Col xs={12} sm={6}><Statistic title={t('finance.total')} value={currentBill.total} prefix="¥" valueStyle={{ fontSize: 20, color: 'var(--ark-blue)', fontWeight: 'bold' }} /></Col>
         </Row>
       )}
       <Table rowKey="id" columns={columns} dataSource={records} pagination={false} size="small" />

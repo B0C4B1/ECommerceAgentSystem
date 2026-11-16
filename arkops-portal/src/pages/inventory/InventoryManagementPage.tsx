@@ -19,6 +19,7 @@ import { useI18n } from '../../app/i18n';
 import { useStoreScope } from '../../app/storeScope';
 import { usePermission } from '../../app/usePermission';
 import { PageHeader } from '../../components/PageHeader';
+import { StatTile } from '../../components/metrics/MetricCard';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import type { AllMallId, InventoryItem, ReplenishSuggestion, SafetyStockConfig, TransferRecommendation } from '../../types/domain';
 
@@ -111,7 +112,7 @@ export function InventoryManagementPage() {
       render: (_: unknown, r: InventoryItem) => (
         <Space direction="vertical" size={0}>
           <Typography.Text strong style={{ color: r.alertLevel === 'critical' ? 'var(--ark-red)' : 'inherit' }}>{r.currentStock}</Typography.Text>
-          <Progress percent={r.safetyStock > 0 ? +(r.currentStock / r.safetyStock * 100).toFixed(0) : 100} size="small" showInfo={false} strokeColor={r.alertLevel === 'critical' ? '#ff4d4f' : r.alertLevel === 'low' ? '#faad14' : '#52c41a'} />
+          <Progress percent={r.safetyStock > 0 ? +(r.currentStock / r.safetyStock * 100).toFixed(0) : 100} size="small" showInfo={false} strokeColor={r.alertLevel === 'critical' ? 'var(--ark-red)' : r.alertLevel === 'low' ? 'var(--ark-amber)' : 'var(--ark-green)'} />
         </Space>
       ),
     },
@@ -119,7 +120,7 @@ export function InventoryManagementPage() {
     { title: t('inventory.dailySales'), dataIndex: 'dailySales', width: 80 },
     {
       title: t('inventory.daysLeft'), dataIndex: 'daysUntilStockout', width: 80,
-      render: (v: number) => <Typography.Text strong style={{ color: v <= 2 ? 'var(--ark-red)' : v <= 7 ? '#faad14' : 'inherit' }}>{v}{t('inventory.days')}</Typography.Text>,
+      render: (v: number) => <Typography.Text strong style={{ color: v <= 2 ? 'var(--ark-red)' : v <= 7 ? 'var(--ark-amber)' : 'inherit' }}>{v}{t('inventory.days')}</Typography.Text>,
     },
     {
       title: t('inventory.source'), dataIndex: 'source', width: 90,
@@ -139,13 +140,13 @@ export function InventoryManagementPage() {
       <PageHeader title={t('nav.inventory')} description={t('inventory.subtitle')} />
 
       {/* Stats */}
-      <Row gutter={[12, 12]} style={{ padding: '0 24px', marginBottom: 12 }}>
-        <Col xs={12} sm={4}><Card size="small"><Statistic title={t('inventory.criticalCount')} value={critical} valueStyle={{ color: 'var(--ark-red)', fontSize: 20 }} /></Card></Col>
-        <Col xs={12} sm={4}><Card size="small"><Statistic title={t('inventory.lowCount')} value={low} valueStyle={{ color: '#faad14', fontSize: 20 }} /></Card></Col>
-        <Col xs={12} sm={4}><Card size="small"><Statistic title={t('inventory.healthyCount')} value={overview?.healthy ?? 0} valueStyle={{ color: 'var(--ark-green)', fontSize: 20 }} /></Card></Col>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('inventory.totalStock')} value={overview?.totalStock ?? 0} /></Card></Col>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('inventory.totalValue')} value={formatCurrency(overview?.totalValue ?? 0)} /></Card></Col>
-      </Row>
+      <div className="stat-grid stat-grid-5" style={{ padding: '0 24px' }}>
+        <StatTile label={t('inventory.criticalCount')} value={critical} tone="red" />
+        <StatTile label={t('inventory.lowCount')} value={low} tone="amber" />
+        <StatTile label={t('inventory.healthyCount')} value={overview?.healthy ?? 0} tone="green" />
+        <StatTile label={t('inventory.totalStock')} value={overview?.totalStock ?? 0} />
+        <StatTile label={t('inventory.totalValue')} value={formatCurrency(overview?.totalValue ?? 0)} />
+      </div>
 
       {/* Alerts */}
       {(critical > 0 || low > 0) && (

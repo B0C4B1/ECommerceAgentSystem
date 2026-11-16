@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AllMall Portal</title>
+    <script>
+      // U4.3 首屏主题对齐：tokens.css 的主题靠 html[data-theme]，而 antd 的 token 由 React
+      // 首帧直接按 localStorage 决定。属性若等到 ThemeProvider 的 effect 才写入，暗色用户
+      // 每刷新一次都会先看到一帧「浅色 CSS 变量 + 暗色 antd token」的半生效画面。
+      // 这里在首帧前把同一套判断（存储值 → 系统偏好）同步写入，逻辑与 src/app/theme.tsx 一致。
+      (function () {
+        try {
+          var mode = localStorage.getItem('allmall-portal-theme');
+          var dark =
+            mode === 'dark' ||
+            (mode !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var resolved = dark ? 'dark' : 'light';
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.style.colorScheme = resolved;
+        } catch (e) {
+          /* localStorage 不可用时退回 tokens.css 的默认亮色 */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

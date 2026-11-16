@@ -25,10 +25,11 @@ const exportOptions = [
 ];
 
 const prebuiltReports = [
-  { title: 'reports.weeklySales', icon: <BarChartOutlined />, color: '#1890ff' },
-  { title: 'reports.monthlyPnl', icon: <FilePdfOutlined />, color: '#52c41a' },
-  { title: 'reports.productPerformance', icon: <BarChartOutlined />, color: '#722ed1' },
-  { title: 'reports.customerInsight', icon: <FilePdfOutlined />, color: '#eb2f96' },
+  { title: 'reports.weeklySales', icon: <BarChartOutlined />, color: 'var(--ark-blue)' },
+  { title: 'reports.monthlyPnl', icon: <FilePdfOutlined />, color: 'var(--ark-green)' },
+  { title: 'reports.productPerformance', icon: <BarChartOutlined />, color: 'var(--ark-purple)' },
+  // 客户洞察用 teal 而非紫色：紫色已被「商品表现」占用，同屏两张卡不能同色相
+  { title: 'reports.customerInsight', icon: <FilePdfOutlined />, color: 'var(--ark-teal)' },
 ];
 
 export function ReportsPage() {
@@ -90,7 +91,7 @@ export function ReportsPage() {
                     ] : []}
                   >
                     <List.Item.Meta
-                      avatar={item.format === 'csv' ? <FileExcelOutlined style={{ color: '#52c41a', fontSize: 20 }} /> : item.format === 'excel' ? <FileExcelOutlined style={{ color: '#1890ff', fontSize: 20 }} /> : <FilePdfOutlined style={{ color: '#ff4d4f', fontSize: 20 }} />}
+                      avatar={item.format === 'csv' ? <FileExcelOutlined style={{ color: 'var(--ark-green)', fontSize: 20 }} /> : item.format === 'excel' ? <FileExcelOutlined style={{ color: 'var(--ark-blue)', fontSize: 20 }} /> : <FilePdfOutlined style={{ color: 'var(--ark-red)', fontSize: 20 }} />}
                       title={t(item.labelKey)}
                       description={t(item.desc)}
                     />

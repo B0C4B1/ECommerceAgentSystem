@@ -70,7 +70,7 @@ export function FinanceReconcileCard() {
       dataIndex: 'diff',
       width: 100,
       render: (v: number) => {
-        const color = v === 0 ? '#16a34a' : '#dc2626';
+        const color = v === 0 ? 'var(--ark-green)' : 'var(--ark-red)';
         return <Typography.Text style={{ fontSize: 13, color, fontWeight: 600 }}>¥{v.toFixed(2)}</Typography.Text>;
       },
     },
@@ -96,10 +96,10 @@ export function FinanceReconcileCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #64748b' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-muted)' }}
       title={
         <Space>
-          <BankOutlined style={{ color: '#64748b' }} />
+          <BankOutlined style={{ color: 'var(--ark-muted)' }} />
           {t('finance.reconcileTitle')}
           <Badge status="processing" />
           <Tag color="default" style={{ fontSize: 11 }}>{t('finance.lastReconcile')}: {lastReconcile}</Tag>

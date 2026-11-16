@@ -139,10 +139,10 @@ export function CrmSegmentCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #7c3aed' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-purple)' }}
       title={
         <Space>
-          <GiftOutlined style={{ color: '#7c3aed' }} />
+          <GiftOutlined style={{ color: 'var(--ark-purple)' }} />
           {t('crm.segmentCardTitle')}
           <Badge status="processing" />
           <Tag color="purple" style={{ fontSize: 11 }}>{t('crm.lastRefresh')}: {lastRefresh}</Tag>

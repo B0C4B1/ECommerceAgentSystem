@@ -1,13 +1,13 @@
 import { CheckCircleOutlined, DeleteOutlined, KeyOutlined, LineChartOutlined, PlusOutlined, RobotOutlined, ThunderboltOutlined, WalletOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { modelsApi } from '../../api/models';
 import { useI18n } from '../../app/i18n';
 import { usePermission } from '../../app/usePermission';
 import { TrendBarChart } from '../../components/charts/TrendBarChart';
-import { MetricCard } from '../../components/metrics/MetricCard';
+import { StatTile } from '../../components/metrics/MetricCard';
 import { PageHeader } from '../../components/PageHeader';
 import type { AgentModelBinding, ModelInfo } from '../../types/domain';
 
@@ -217,24 +217,17 @@ export function ModelListPage() {
   return (
     <div className="page-stack">
       <PageHeader title={t('model.title')} description={t('model.descriptionSimple')} />
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={12} sm={8}>
-          <MetricCard title={t('model.totalModels')} value={allActive.length} prefix={<ThunderboltOutlined />} />
-        </Col>
-        <Col xs={12} sm={8}>
-          <MetricCard title={t('model.totalCalls')} value={totalCalls} prefix={<LineChartOutlined />} />
-        </Col>
-        <Col xs={12} sm={8}>
-          <MetricCard
-            title={t('modelsv2.estimatedCost')}
-            value={totalEstimatedCost}
-            precision={2}
-            prefix={<WalletOutlined />}
-            suffix={t('modelsv2.cny')}
-            helper={t('modelsv2.estimatedCostHelper')}
-          />
-        </Col>
-      </Row>
+      <div className="stat-grid stat-grid-3">
+        <StatTile icon={<ThunderboltOutlined />} label={t('model.totalModels')} value={allActive.length} />
+        <StatTile icon={<LineChartOutlined />} label={t('model.totalCalls')} value={totalCalls} />
+        <StatTile
+          icon={<WalletOutlined />}
+          label={t('modelsv2.estimatedCost')}
+          value={`¥${totalEstimatedCost.toFixed(2)}`}
+          tone="purple"
+          helper={t('modelsv2.estimatedCostHelper')}
+        />
+      </div>
 
       {/* Agent 模型分配（含平台模型选择） */}
       <Card
@@ -280,7 +273,7 @@ export function ModelListPage() {
                     value: stat.totalCalls,
                     max: Math.max(...usageStats.map((item) => item.totalCalls), 1),
                     title: `${stat.modelName}: ${stat.totalCalls.toLocaleString()} ${t('modelsv2.callsUnit')}`,
-                    color: '#2563eb',
+                    color: 'var(--ark-blue)',
                     minHeight: 12,
                     width: 22
                   }
@@ -292,9 +285,9 @@ export function ModelListPage() {
                 <div key={stat.modelId} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--ark-border-soft)' }}>
                   <Typography.Text type="secondary" style={{ fontSize: 13 }}>{stat.modelName}</Typography.Text>
                   <Space size="large">
-                    <Typography.Text style={{ fontSize: 13, color: '#2563eb' }}>{stat.totalCalls.toLocaleString()} {t('modelsv2.callsUnit')}</Typography.Text>
+                    <Typography.Text style={{ fontSize: 13, color: 'var(--ark-blue)' }}>{stat.totalCalls.toLocaleString()} {t('modelsv2.callsUnit')}</Typography.Text>
                     <Tooltip title={`${stat.totalTokens.toLocaleString()} Tokens`}>
-                      <Typography.Text style={{ fontSize: 13, color: '#7c3aed' }}>
+                      <Typography.Text style={{ fontSize: 13, color: 'var(--ark-purple)' }}>
                         {t('modelsv2.costAbout')} ¥{estimateCost(stat.modelId, stat.totalTokens).toFixed(2)}
                       </Typography.Text>
                     </Tooltip>

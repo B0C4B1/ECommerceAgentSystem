@@ -65,8 +65,8 @@ export function InventoryDashboardCard() {
       title: t('inventory.stock'),
       dataIndex: 'stock',
       width: 100,
-      render: (v: number) => {
-        const color = v === 0 ? '#dc2626' : v < 20 ? '#ea580c' : '#16a34a';
+      render: (v: number, r: typeof inventory[0]) => {
+        const color = v === 0 || r.status === 'critical' ? 'var(--ark-red)' : r.status === 'low' ? 'var(--ark-orange)' : 'var(--ark-green)';
         return <Typography.Text style={{ fontSize: 13, color, fontWeight: 600 }}>{v}</Typography.Text>;
       },
     },
@@ -104,10 +104,10 @@ export function InventoryDashboardCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #dc2626' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-red)' }}
       title={
         <Space>
-          <ShoppingCartOutlined style={{ color: '#dc2626' }} />
+          <ShoppingCartOutlined style={{ color: 'var(--ark-red)' }} />
           {t('inventory.dashboardTitle')}
           <Badge status="processing" />
           <Tag color="red" style={{ fontSize: 11 }}>{t('inventory.lastScan')}: {lastScan}</Tag>

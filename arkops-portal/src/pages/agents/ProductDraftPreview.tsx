@@ -28,8 +28,8 @@ export function ProductDraftPreview({ draft, task, onRegenerate, onCancel }: Pro
               <Typography.Text type="secondary" style={{ fontSize: 11 }}>{draft.category}</Typography.Text>
             </Space>
             <Space size="small">
-              <Statistic title={t('draft.sellingPrice')} value={draft.sellingPrice} prefix="¥" precision={2} valueStyle={{ fontSize: 14, color: '#2563eb' }} />
-              <Statistic title={t('draft.grossMargin')} value={((draft.sellingPrice - draft.costPrice) / draft.sellingPrice * 100).toFixed(0)} suffix="%" valueStyle={{ fontSize: 14, color: '#16a34a' }} />
+              <Statistic title={t('draft.sellingPrice')} value={draft.sellingPrice} prefix="¥" precision={2} valueStyle={{ fontSize: 14, color: 'var(--ark-blue)' }} />
+              <Statistic title={t('draft.grossMargin')} value={((draft.sellingPrice - draft.costPrice) / draft.sellingPrice * 100).toFixed(0)} suffix="%" valueStyle={{ fontSize: 14, color: 'var(--ark-green)' }} />
               <Statistic title={t('draft.totalStock')} value={draft.totalStock} valueStyle={{ fontSize: 14 }} />
             </Space>
           </Space>
@@ -97,8 +97,8 @@ export function ProductDraftPreview({ draft, task, onRegenerate, onCancel }: Pro
         {/* 价格体系 */}
         <Row gutter={12} style={{ marginBottom: 16 }}>
           <Col span={8}><Statistic title={t('draft.costPrice')} value={draft.costPrice} prefix="¥" precision={2} valueStyle={{ fontSize: 16 }} /></Col>
-          <Col span={8}><Statistic title={t('draft.sellingPrice')} value={draft.sellingPrice} prefix="¥" precision={2} valueStyle={{ fontSize: 16, color: '#2563eb' }} /></Col>
-          <Col span={8}><Statistic title={t('draft.grossMargin')} value={((draft.sellingPrice - draft.costPrice) / draft.sellingPrice * 100).toFixed(0)} suffix="%" valueStyle={{ fontSize: 16, color: '#16a34a' }} /></Col>
+          <Col span={8}><Statistic title={t('draft.sellingPrice')} value={draft.sellingPrice} prefix="¥" precision={2} valueStyle={{ fontSize: 16, color: 'var(--ark-blue)' }} /></Col>
+          <Col span={8}><Statistic title={t('draft.grossMargin')} value={((draft.sellingPrice - draft.costPrice) / draft.sellingPrice * 100).toFixed(0)} suffix="%" valueStyle={{ fontSize: 16, color: 'var(--ark-green)' }} /></Col>
         </Row>
 
         {/* 库存物流 */}
@@ -131,11 +131,11 @@ export function ProductDraftPreview({ draft, task, onRegenerate, onCancel }: Pro
           <Col span={6}><Statistic title={t('draft.mainImages')} value={draft.mainImages} valueStyle={{ fontSize: 14 }} /></Col>
           <Col span={6}><Statistic title={t('draft.skuImages')} value={draft.skuImages} valueStyle={{ fontSize: 14 }} /></Col>
           <Col span={6}><Statistic title={t('draft.detailImages')} value={draft.detailImages} valueStyle={{ fontSize: 14 }} /></Col>
-          <Col span={6}><Statistic title={t('draft.shortVideo')} value={draft.hasVideo ? t('draft.videoGenerated') : t('draft.videoNotGenerated')} valueStyle={{ fontSize: 14, color: draft.hasVideo ? '#16a34a' : '#94a3b8' }} /></Col>
+          <Col span={6}><Statistic title={t('draft.shortVideo')} value={draft.hasVideo ? t('draft.videoGenerated') : t('draft.videoNotGenerated')} valueStyle={{ fontSize: 14, color: draft.hasVideo ? 'var(--ark-green)' : 'var(--ark-muted)' }} /></Col>
         </Row>
 
         {/* AI 文案 */}
-        <div style={{ background: '#f0f5ff', borderLeft: '3px solid #2563eb', padding: 12, borderRadius: 4 }}>
+        <div style={{ background: 'color-mix(in srgb, var(--ark-blue) 8%, var(--ark-panel))', borderLeft: '3px solid var(--ark-blue)', padding: 12, borderRadius: 4 }}>
           <Typography.Text strong style={{ fontSize: 12 }}>{t('draft.aiCopyTitle')}</Typography.Text>
           <div style={{ marginTop: 8 }}>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('draft.seoTitle')}</Typography.Text>

@@ -28,6 +28,8 @@ import { useDemoMode } from '../../app/demoMode';
 import { useStoreScope } from '../../app/storeScope';
 import { useI18n } from '../../app/i18n';
 import { TrendBarChart } from '../../components/charts/TrendBarChart';
+import { EmptyState } from '../../components/EmptyState';
+import { DashboardSkeleton } from '../../components/PageSkeleton';
 import { PageHeader } from '../../components/PageHeader';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import { StoreGoalCard } from '../../components/dashboard/StoreGoalCard';
@@ -85,7 +87,14 @@ export function DashboardPage() {
   const { scope: storeScope, activeStore, isAllStores } = useStoreScope();
   const scopedStoreName = activeStore?.name;
 
-  const { data: storesData } = useQuery({
+  // U2.1: 首屏结论（店铺数、「待你处理」、「关注项」）在数据回来前不成立，
+  // 三态显式化 —— 加载给骨架，失败给重试，避免把「正在读取」读成「没有店铺 / 全部清空」。
+  const {
+    data: storesData,
+    isLoading: storesLoading,
+    isError: storesFailed,
+    refetch: refetchStores,
+  } = useQuery({
     queryKey: ['stores'],
     queryFn: () => storesApi.list(),
   });
@@ -256,13 +265,23 @@ export function DashboardPage() {
   const healthFixLabel = (issue: AgentHealthIssue) =>
     t(issue.kind === 'auth_invalid' ? 'agentConsole.healthFixStores' : 'agentConsole.healthFixAgents');
 
-  const { data: businessMetrics } = useQuery({
+  const {
+    data: businessMetrics,
+    isLoading: metricsLoading,
+    isError: metricsFailed,
+    refetch: refetchMetrics,
+  } = useQuery({
     queryKey: ['businessDashboard', timeRange, storeScope],
     queryFn: () => businessDashboardApi.getMetrics(timeRange, scopedStoreName),
     enabled: storeCount > 0,
   });
 
-  const { data: dashboardSummary } = useQuery({
+  const {
+    data: dashboardSummary,
+    isLoading: summaryLoading,
+    isError: summaryFailed,
+    refetch: refetchSummary,
+  } = useQuery({
     queryKey: ['dashboard'],
     queryFn: dashboardApi.getSummary,
     enabled: storeCount > 0,
@@ -274,6 +293,34 @@ export function DashboardPage() {
   const gmvChange = businessMetrics ? changePercent(businessMetrics.periodGmv.current, businessMetrics.periodGmv.previous) : { value: 0, up: true };
   const orderChange = businessMetrics ? changePercent(businessMetrics.periodOrders.current, businessMetrics.periodOrders.previous) : { value: 0, up: true };
   const comparisonLabel = businessMetrics ? t(businessMetrics.comparisonLabelKey) : '';
+
+  // U5.1.1：趋势图结论前置。两根柱子各自缩放到自己的最大值（见 TrendBarChart），
+  // 柱高差 125→140px 只差 11%，人从柱子上读不出「这周是升是降」，订单量还只在悬浮提示里。
+  // 所以先在图上写一句结论：合计多少、末日较首日升还是降、最高一天是哪天（含 GMV 与单量）。
+  const trendPoints = businessMetrics?.gmvTrend ?? [];
+  const trendPeak = trendPoints.length
+    ? trendPoints.reduce((best, point) => (point.gmv > best.gmv ? point : best), trendPoints[0])
+    : undefined;
+  const trendFirst = trendPoints[0];
+  const trendLast = trendPoints[trendPoints.length - 1];
+  const trendGmvTotal = trendPoints.reduce((sum, point) => sum + point.gmv, 0);
+  const trendOrderTotal = trendPoints.reduce((sum, point) => sum + point.orders, 0);
+  const trendDelta = trendFirst && trendLast && trendFirst.gmv > 0
+    ? Math.round(((trendLast.gmv - trendFirst.gmv) / trendFirst.gmv) * 100)
+    : 0;
+  const trendDeltaLabel = `${trendDelta >= 0 ? '+' : ''}${trendDelta}%`;
+  // 同一句结论既显示在图上，也作为图表的 aria-label —— 读屏与键盘用户不靠悬浮也能拿到结论。
+  const trendSummary = trendPeak && trendLast
+    ? t(timeRange === '30d' ? 'dashboardv2.trendSummary30d' : 'dashboardv2.trendSummary7d', {
+        total: formatCurrency(trendGmvTotal),
+        orders: formatNumber(trendOrderTotal),
+        last: formatCurrency(trendLast.gmv),
+        delta: trendDeltaLabel,
+        peakDate: trendPeak.date,
+        peakGmv: formatCurrency(trendPeak.gmv),
+        peakOrders: formatNumber(trendPeak.orders),
+      })
+    : '';
 
   // ===== 顶部关注条数据（C1/C2）=====
   // 与库存明细「预警」筛选用同一份 SKU 数据，避免关注条数字和点进去的行数对不上。
@@ -317,6 +364,31 @@ export function DashboardPage() {
     );
   }
 
+  // U2.1 三态之一：读取中。骨架只说明「正在读」，不替人下「没有店铺 / 全部清空」的结论。
+  if (storesLoading || metricsLoading || summaryLoading) {
+    return <DashboardSkeleton />;
+  }
+
+  // U2.1 三态之二：读取失败。明确「不是没有数据」，并就地重试，不用刷新整页。
+  if (storesFailed || metricsFailed || summaryFailed) {
+    return (
+      <div className="page-stack">
+        <PageHeader title={t('dashboard.title')} description={t('dashboard.description')} />
+        <Card size="small">
+          <EmptyState
+            description={t('dashboardv2.loadFailed')}
+            actionText={t('dashboardv2.loadRetry')}
+            onAction={() => {
+              void refetchStores();
+              void refetchMetrics();
+              void refetchSummary();
+            }}
+          />
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -348,11 +420,20 @@ export function DashboardPage() {
 
       {/* 演示模式入口 — 无店铺时显示 */}
       {!isDemo && storeCount === 0 && (
-        <Card size="small" style={{ marginBottom: 16, background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)', border: '1px solid #93c5fd' }}>
+        <Card
+          size="small"
+          style={{
+            marginBottom: 16,
+            // 演示横幅是浅蓝提示底：用 --ark-blue 与面板色混出两档深浅，暗色下自动变暗，不再写死浅蓝底色。
+            background:
+              'linear-gradient(135deg, color-mix(in srgb, var(--ark-blue) 7%, var(--ark-panel)) 0%, color-mix(in srgb, var(--ark-blue) 15%, var(--ark-panel)) 100%)',
+            border: '1px solid color-mix(in srgb, var(--ark-blue) 45%, var(--ark-panel))',
+          }}
+        >
           <Row align="middle" justify="space-between">
             <Col>
               <Space>
-                <PlayCircleOutlined style={{ color: '#2563eb', fontSize: 18 }} />
+                <PlayCircleOutlined style={{ color: 'var(--ark-blue)', fontSize: 18 }} />
                 <div>
                   <Typography.Text strong style={{ fontSize: 13 }}>{t('dashboard.demoBanner')}</Typography.Text>
                 </div>
@@ -376,7 +457,7 @@ export function DashboardPage() {
           <Row align="middle" justify="space-between" gutter={[16, 12]}>
             <Col flex="auto">
               <Space size={8} wrap>
-                <RobotOutlined style={{ color: '#2563eb', fontSize: 18 }} />
+                <RobotOutlined style={{ color: 'var(--ark-blue)', fontSize: 18 }} />
                 <Typography.Text strong>{t('agentConsole.title')}</Typography.Text>
                 <Tag color={consoleTag.color}>{consoleTag.label}</Tag>
                 {accountScopeTag}
@@ -414,15 +495,65 @@ export function DashboardPage() {
                   </Typography.Title>
                 </div>
                 {canOpenInbox && (
-                  <Link to="/inbox">
-                    <Button size="small" type="primary">
-                      {t('agentConsole.openInbox')} <RightOutlined />
-                    </Button>
-                  </Link>
+                  <Button size="small" type="primary" onClick={() => navigate('/inbox')}>
+                    {t('agentConsole.openInbox')} <RightOutlined />
+                  </Button>
                 )}
               </Space>
             </Col>
           </Row>
+          {/* ===== U5.1.2 首屏经营快照：不改「先人后数」的块顺序，把当日经营数字压进运营台卡片内 ===== */}
+          {businessMetrics && (
+            <div className="dashboard-snapshot">
+              <Typography.Text strong style={{ fontSize: 12 }}>
+                {t(
+                  timeRange === '30d'
+                    ? 'dashboardv2.snapshot30d'
+                    : timeRange === '7d'
+                      ? 'dashboardv2.snapshot7d'
+                      : 'dashboardv2.snapshotToday'
+                )}
+              </Typography.Text>
+              <span className="dashboard-snapshot-scope">
+                {scopedStoreName ?? t('dashboardv2.filterAllStores')}
+              </span>
+              <span className="dashboard-snapshot-metric">
+                {t('dashboardv2.kpiGmv')}
+                <strong>{formatCurrency(businessMetrics.periodGmv.current)}</strong>
+                <span className="dashboard-snapshot-delta">
+                  {gmvChange.up ? '↑' : '↓'} {Math.abs(gmvChange.value)}% {comparisonLabel}
+                </span>
+              </span>
+              <span className="dashboard-snapshot-metric">
+                {t('dashboardv2.kpiOrders')}
+                <strong>{formatNumber(businessMetrics.periodOrders.current)}</strong>
+                <span className="dashboard-snapshot-delta">
+                  {orderChange.up ? '↑' : '↓'} {Math.abs(orderChange.value)}% {comparisonLabel}
+                </span>
+              </span>
+              <span className="dashboard-snapshot-metric">
+                {t('dashboardv2.kpiAdRoi')}
+                <strong>{businessMetrics.adMetrics.roas.toFixed(1)}×</strong>
+                <span className="dashboard-snapshot-delta">
+                  {t('dashboardv2.adRoiTarget', { target: businessMetrics.adMetrics.targetRoas.toFixed(1) })}
+                </span>
+              </span>
+              <Button
+                type="link"
+                size="small"
+                className="dashboard-snapshot-more"
+                onClick={() => {
+                  const target = document.getElementById('business-kpis');
+                  target?.scrollIntoView({
+                    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+                    block: 'start',
+                  });
+                }}
+              >
+                {t('dashboardv2.snapshotMore')} ↓
+              </Button>
+            </div>
+          )}
           {agentHealth && (
             <div style={{ marginTop: 8 }}>
               <Space size={8} wrap>
@@ -494,7 +625,7 @@ export function DashboardPage() {
             {visibleAttentionItems.length > 0 ? (
               <>
                 <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 6, fontSize: 12 }}>
-                  <AlertOutlined style={{ color: '#ea580c', marginRight: 4 }} />
+                  <AlertOutlined style={{ color: 'var(--ark-orange)', marginRight: 4 }} />
                   {t('dashboardv2.attentionTitle')} · {t('agentConsole.attentionHint')}
                 </Typography.Text>
                 <div className="dashboard-priority-list">
@@ -536,13 +667,13 @@ export function DashboardPage() {
 
       {/* ===== 核心 KPI（≤4 个，C4）===== */}
       {businessMetrics && (
-        <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Row id="business-kpis" gutter={[12, 12]} style={{ marginBottom: 16 }}>
           {[
             {
               title: t('dashboardv2.kpiGmv'),
               value: formatCurrency(businessMetrics.periodGmv.current),
               meta: `${gmvChange.up ? '↑' : '↓'} ${Math.abs(gmvChange.value)}% ${comparisonLabel}`,
-              color: '#2563eb',
+              color: 'var(--ark-blue)',
               icon: <PayCircleOutlined />,
               estimate: false,
             },
@@ -550,7 +681,7 @@ export function DashboardPage() {
               title: t('dashboardv2.kpiOrders'),
               value: formatNumber(businessMetrics.periodOrders.current),
               meta: `${orderChange.up ? '↑' : '↓'} ${Math.abs(orderChange.value)}% ${comparisonLabel}`,
-              color: '#0f766e',
+              color: 'var(--ark-teal)',
               icon: <ShoppingCartOutlined />,
               estimate: false,
             },
@@ -558,7 +689,7 @@ export function DashboardPage() {
               title: t('dashboardv2.kpiAdRoi'),
               value: `${businessMetrics.adMetrics.roas.toFixed(1)}×`,
               meta: t('dashboardv2.adRoiTarget', { target: businessMetrics.adMetrics.targetRoas.toFixed(1) }),
-              color: '#7c3aed',
+              color: 'var(--ark-purple)',
               icon: <DashboardOutlined />,
               estimate: false,
             },
@@ -566,7 +697,7 @@ export function DashboardPage() {
               title: t('dashboardv2.kpiEstProfit'),
               value: formatCurrency(Math.round(businessMetrics.periodGmv.current * ESTIMATED_NET_MARGIN)),
               meta: t('dashboardv2.estProfitAssumption'),
-              color: '#16a34a',
+              color: 'var(--ark-green)',
               icon: <RiseOutlined />,
               estimate: true,
             },
@@ -598,8 +729,13 @@ export function DashboardPage() {
           style={{ marginBottom: 16 }}
           extra={timeRange === '30d' ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('dashboardv2.trendBucketNote')}</Typography.Text> : null}
         >
+          {trendSummary && (
+            <Typography.Text strong style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>
+              {trendSummary}
+            </Typography.Text>
+          )}
           <TrendBarChart
-            ariaLabel={t('dashboardv2.trendTitle')}
+            ariaLabel={trendSummary ? `${t('dashboardv2.trendTitle')}：${trendSummary}` : t('dashboardv2.trendTitle')}
             points={businessMetrics.gmvTrend.map((point) => ({
               key: point.date,
               label: point.date,
@@ -613,7 +749,9 @@ export function DashboardPage() {
           <div className="chart-legend">
             <span><i className="legend-dot legend-gmv" />{t('dashboardv2.legendGmv')}</span>
             <span><i className="legend-dot legend-orders" />{t('dashboardv2.legendOrders')}</span>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('dashboardv2.trendScaleNote')}</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t(timeRange === 'today' ? 'dashboardv2.trendScopeToday' : 'dashboardv2.trendScaleNote')}
+            </Typography.Text>
           </div>
         </Card>
       )}

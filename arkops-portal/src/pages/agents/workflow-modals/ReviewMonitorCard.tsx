@@ -85,10 +85,10 @@ export function ReviewMonitorCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #f59e0b' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-amber)' }}
       title={
         <Space>
-          <StarOutlined style={{ color: '#f59e0b' }} />
+          <StarOutlined style={{ color: 'var(--ark-amber)' }} />
           {t('review.monitorTitle')}
           <Badge status="processing" />
           <Tag color="orange" style={{ fontSize: 11 }}>{t('review.lastScan')}: {lastScan}</Tag>

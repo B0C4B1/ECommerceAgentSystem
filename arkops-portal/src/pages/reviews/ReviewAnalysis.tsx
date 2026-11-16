@@ -24,13 +24,20 @@ interface Props {
 
 type ProblemCategory = 'quality' | 'logistics' | 'pricing' | 'service' | 'description' | 'other';
 
-const CATEGORY_CONFIG: Record<ProblemCategory, { key: string; icon: React.ReactNode; color: string; keywords: string[] }> = {
-  quality:      { key: 'reviews.catQuality', icon: <ShopOutlined />, color: '#ff4d4f', keywords: ['质量', '坏了', '散架', '瑕疵', '磨损', '脱线', '异味', '做工', '毛刺', '划痕', '翻新'] },
-  logistics:    { key: 'reviews.catLogistics', icon: <CarOutlined />, color: '#faad14', keywords: ['物流', '快递', '发货', '配送', '揽收', '慢', '迟', '送达'] },
-  pricing:      { key: 'reviews.catPricing', icon: <DollarOutlined />, color: '#722ed1', keywords: ['不值', '太贵', '价格', '降价', '性价比', '优惠', '贵了'] },
-  service:      { key: 'reviews.catService', icon: <SmileOutlined />, color: '#1890ff', keywords: ['客服', '态度', '回复', '不理', '爱答不理', '投诉', '服务差'] },
-  description:  { key: 'reviews.catDescription', icon: <FileTextOutlined />, color: '#eb2f96', keywords: ['色差', '不一样', '图片', '不符', '差距', '描述不符', '实拍'] },
-  other:        { key: 'reviews.catOther', icon: <QuestionCircleOutlined />, color: '#8c8c8c', keywords: [] },
+/* hex-audit-off — 「描述不符」分类识别色（洋红）：
+   语义上等同 antd Tag 预设 magenta，用在进度条与图标上需与 Tag 同色；
+   tokens.css 无语义等价的洋红，暗色卡片底 #111827 上对比约 4.4:1（图形元素 ≥3:1），
+   因此固定不随主题走，换取六个分类在双主题下颜色身份一致。 */
+const DESCRIPTION_IDENT_COLOR = '#eb2f96';
+/* hex-audit-on */
+
+const CATEGORY_CONFIG: Record<ProblemCategory, { key: string; icon: React.ReactNode; color: string; tagColor: string; keywords: string[] }> = {
+  quality:      { key: 'reviews.catQuality', icon: <ShopOutlined />, color: 'var(--ark-red)', tagColor: 'red', keywords: ['质量', '坏了', '散架', '瑕疵', '磨损', '脱线', '异味', '做工', '毛刺', '划痕', '翻新'] },
+  logistics:    { key: 'reviews.catLogistics', icon: <CarOutlined />, color: 'var(--ark-amber)', tagColor: 'gold', keywords: ['物流', '快递', '发货', '配送', '揽收', '慢', '迟', '送达'] },
+  pricing:      { key: 'reviews.catPricing', icon: <DollarOutlined />, color: 'var(--ark-purple)', tagColor: 'purple', keywords: ['不值', '太贵', '价格', '降价', '性价比', '优惠', '贵了'] },
+  service:      { key: 'reviews.catService', icon: <SmileOutlined />, color: 'var(--ark-blue)', tagColor: 'blue', keywords: ['客服', '态度', '回复', '不理', '爱答不理', '投诉', '服务差'] },
+  description:  { key: 'reviews.catDescription', icon: <FileTextOutlined />, color: DESCRIPTION_IDENT_COLOR, tagColor: 'magenta', keywords: ['色差', '不一样', '图片', '不符', '差距', '描述不符', '实拍'] },
+  other:        { key: 'reviews.catOther', icon: <QuestionCircleOutlined />, color: 'var(--ark-muted)', tagColor: 'default', keywords: [] },
 };
 
 function categorizeReview(content: string): ProblemCategory {
@@ -205,7 +212,7 @@ ${suggestion.detail.slice(0, 2).map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
                     <Space>
                       <span style={{ color: config.color }}>{config.icon}</span>
                       <Typography.Text strong>{t(config.key)}</Typography.Text>
-                      <Tag color={config.color}>{stats.count}{t('reviews.analysisReviews')}（{pct}%）</Tag>
+                      <Tag color={config.tagColor}>{stats.count}{t('reviews.analysisReviews')}（{pct}%）</Tag>
                       <Tag>{t('reviews.analysisAvgRating')}: {stats.avgRating}⭐</Tag>
                     </Space>
                   }
@@ -222,7 +229,7 @@ ${suggestion.detail.slice(0, 2).map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
                       onClick={() => onSelectReview(r)}
                       style={{
                         padding: '4px 8px', margin: '4px 0', borderRadius: 4, cursor: 'pointer',
-                        background: selectedReview?.id === r.id ? 'var(--ark-purple-soft)' : 'var(--ark-bg-sink)',
+                        background: selectedReview?.id === r.id ? 'color-mix(in srgb, var(--ark-purple) 14%, var(--ark-panel))' : 'var(--ark-panel-soft)',
                         fontSize: 12, lineHeight: '18px',
                       }}
                     >
@@ -243,7 +250,7 @@ ${suggestion.detail.slice(0, 2).map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
                         <div>
                           <Typography.Text strong style={{ fontSize: 12, color: 'var(--ark-purple)' }}>{suggestion.short}</Typography.Text>
                           {suggestion.detail.map((d, i) => (
-                            <div key={i} style={{ fontSize: 11, color: 'var(--ark-text-secondary)', marginTop: 4, paddingLeft: 12 }}>
+                            <div key={i} style={{ fontSize: 11, color: 'var(--ark-muted)', marginTop: 4, paddingLeft: 12 }}>
                               • {d}
                             </div>
                           ))}
@@ -268,7 +275,7 @@ ${suggestion.detail.slice(0, 2).map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
         >
           {/* Context: selected review */}
           {selectedReview ? (
-            <div style={{ marginBottom: 10, padding: 8, background: 'var(--ark-bg-sink)', borderRadius: 6, fontSize: 12 }}>
+            <div style={{ marginBottom: 10, padding: 8, background: 'var(--ark-panel-soft)', borderRadius: 6, fontSize: 12 }}>
               <Typography.Text type="secondary">{t('reviews.consultContext')}：</Typography.Text>
               <div style={{ marginTop: 4 }}>
                 <Tag>{selectedReview.buyerName}</Tag>
@@ -290,7 +297,7 @@ ${suggestion.detail.slice(0, 2).map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
           <div style={{ flex: 1, overflowY: 'auto', marginBottom: 8 }}>
             {chatMessages.length === 0 && (
               <div style={{ textAlign: 'center', padding: 24 }}>
-                <RobotOutlined style={{ fontSize: 32, color: 'var(--ark-text-tertiary)' }} />
+                <RobotOutlined style={{ fontSize: 32, color: 'var(--ark-muted)' }} />
                 <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8 }}>
                   {t('reviews.consultWelcome')}
                 </Typography.Paragraph>
@@ -319,7 +326,7 @@ ${suggestion.detail.slice(0, 2).map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
               >
                 <div style={{
                   maxWidth: '85%', padding: '6px 10px', borderRadius: 8, fontSize: 12, lineHeight: '18px', whiteSpace: 'pre-line',
-                  background: msg.role === 'user' ? 'var(--ark-purple-soft)' : 'var(--ark-bg-sink)',
+                  background: msg.role === 'user' ? 'color-mix(in srgb, var(--ark-purple) 14%, var(--ark-panel))' : 'var(--ark-panel-soft)',
                   border: `1px solid ${msg.role === 'user' ? 'var(--ark-purple)' : 'var(--ark-border-soft)'}`,
                 }}>
                   {msg.role === 'ai' && <RobotOutlined style={{ marginRight: 4, color: 'var(--ark-purple)', fontSize: 10 }} />}

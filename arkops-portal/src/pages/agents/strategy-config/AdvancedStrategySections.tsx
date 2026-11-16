@@ -282,7 +282,7 @@ export function AdvancedStrategySections({ agent }: AdvancedStrategySectionsProp
                   />
                 </div>
                 {agent.strategyConfig.promotionConfig.autoTriggerRules && (
-                  <Card size="small" style={{ background: '#f0fdf4', border: '1px solid #86efac' }}>
+                  <Card size="small" style={{ background: 'color-mix(in srgb, var(--ark-green) 8%, var(--ark-panel))', border: '1px solid color-mix(in srgb, var(--ark-green) 35%, var(--ark-panel))' }}>
                     <Typography.Title level={5} style={{ fontSize: 13, marginBottom: 8 }}>{t('agent.autoTriggerRules')}</Typography.Title>
                     <Space direction="vertical" size="small" style={{ width: '100%' }}>
                       <Space wrap>

@@ -35,10 +35,10 @@ export function ProductLaunchDraftCard({
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #16a34a' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-green)' }}
       title={
         <Space>
-          <CameraOutlined style={{ color: '#16a34a' }} />
+          <CameraOutlined style={{ color: 'var(--ark-green)' }} />
           {t('agent.productDraftStatus')}
           {activeTasks.length > 0 && (
             <Tag

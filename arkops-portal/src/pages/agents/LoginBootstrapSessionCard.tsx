@@ -114,10 +114,10 @@ export function LoginBootstrapSessionCard({ stores }: LoginBootstrapSessionCardP
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #2563eb' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-blue)' }}
       title={
         <Space>
-          <SafetyOutlined style={{ color: '#2563eb' }} />
+          <SafetyOutlined style={{ color: 'var(--ark-blue)' }} />
           {t('agent.storeSessionStatus')}
           <Tag
             color={stores.some((s) => getSessionState(s.id) !== 'healthy') ? 'orange' : 'green'}

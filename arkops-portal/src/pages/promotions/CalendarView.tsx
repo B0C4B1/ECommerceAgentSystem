@@ -13,6 +13,11 @@ interface Props {
   stores: Store[];
 }
 
+/*
+ * 活动类型识别色：日历格子是「饱和底 + 白字」的小色块，属于主题无关的分类标识。
+ * 若换成 --ark-* 语义色，暗色下 token 变浅会让白字对比跌到 2:1 左右，故此处放行裸 hex。
+ */
+/* hex-audit-off */
 const TYPE_COLORS: Record<string, string> = {
   flash_sale: '#ff4d4f',
   seckill: '#f5222d',
@@ -20,6 +25,7 @@ const TYPE_COLORS: Record<string, string> = {
   bundle: '#722ed1',
   full_reduction: '#1890ff',
 };
+/* hex-audit-on */
 
 export function CalendarView({ campaigns, stores }: Props) {
   const { t } = useI18n();
@@ -42,7 +48,7 @@ export function CalendarView({ campaigns, stores }: Props) {
             <div style={{
               fontSize: 10, lineHeight: '16px', padding: '0 3px', marginBottom: 1,
               background: TYPE_COLORS[c.type] ?? 'var(--ark-purple)',
-              color: '#fff', borderRadius: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              color: 'var(--ark-on-accent)', borderRadius: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
               {c.name}
             </div>
@@ -60,7 +66,7 @@ export function CalendarView({ campaigns, stores }: Props) {
   return (
     <Calendar
       dateCellRender={dateRender}
-      style={{ background: 'var(--ark-bg-surface)', borderRadius: 8, padding: 16 }}
+      style={{ background: 'var(--ark-panel)', borderRadius: 8, padding: 16 }}
     />
   );
 }

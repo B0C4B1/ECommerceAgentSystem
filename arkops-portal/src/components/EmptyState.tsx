@@ -21,7 +21,7 @@ export const EmptyState = memo(function EmptyState({ description, actionText, ac
   const { t } = useI18n();
   return (
     <Empty
-      image={<InboxOutlined style={{ fontSize: 44, color: '#94a3b8' }} />}
+      image={<InboxOutlined style={{ fontSize: 44, color: 'var(--ark-muted)' }} />}
       description={description ?? t('common.empty')}
     >
       {onAction && actionText && (

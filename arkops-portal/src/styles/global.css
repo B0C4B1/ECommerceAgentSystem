@@ -8,6 +8,42 @@ body {
   color: var(--ark-ink);
 }
 
+/* U3.1 键盘基线：链接与自定义可聚焦元素此前完全没有焦点指示，
+   Tab 走查时完全看不出停在哪。颜色只取 --ark-focus-ring（亮/暗各一套），
+   形状统一 2px 实线 + 2px 外扩，不改任何组件的布局尺寸。 */
+a:focus-visible,
+area:focus-visible,
+summary:focus-visible,
+[tabindex]:not([tabindex='-1']):focus-visible {
+  outline: 2px solid var(--ark-focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* U3.2 焦点来源统一：antd 表单控件的焦点光晕来自派生的 controlOutline
+   （亮色实测 rgba(5,122,255,0.06)，对白底几乎不可见），和上面链接的 2px 实线环
+   不是同一套视觉语言。这里把 Select / Input / DatePicker / InputNumber 的焦点环
+   统一到 --ark-focus-ring，形状沿用 2px 实线；颜色仍只取 token。
+   antd 的 CSS-in-JS 规则带了哈希类名（特异性更高且注入在后），故此处需要
+   !important；但排除 error / warning 状态，校验失败的红环不会被焦点环盖掉。 */
+body .ant-select.ant-select-focused:not(.ant-select-disabled):not(.ant-select-status-error):not(.ant-select-status-warning) .ant-select-selector,
+body .ant-input:not(.ant-input-status-error):not(.ant-input-status-warning):focus,
+body .ant-input-focused:not(.ant-input-status-error):not(.ant-input-status-warning),
+body .ant-input-affix-wrapper-focused:not(.ant-input-affix-wrapper-status-error):not(.ant-input-affix-wrapper-status-warning),
+body .ant-input-number-focused:not(.ant-input-number-status-error):not(.ant-input-number-status-warning),
+body .ant-picker-focused:not(.ant-picker-status-error):not(.ant-picker-status-warning) {
+  border-color: var(--ark-focus-ring) !important;
+  box-shadow: 0 0 0 2px var(--ark-focus-ring) !important;
+}
+
+/* U4.3 分页当前页的描边：antd 没有「当前页描边」的组件 token，只能取 colorPrimary
+   （填充色）。暗色下这一圈停在 colorPrimary 的暗色派生值上，和已经改成 --ark-blue 的
+   页码数字不同色，看起来像只改了一半。这里把描边直接对齐 --ark-blue：亮色等于原值
+   （无变化），暗色跟文字同色。antd 规则带哈希类名且注入在后，故需要 !important。 */
+body .ant-pagination .ant-pagination-item-active {
+  border-color: var(--ark-blue) !important;
+}
+
 .app-shell {
   min-height: 100vh;
 }
@@ -341,6 +377,163 @@ body {
 .metric-card-helper {
   display: block;
   font-size: 12px;
+}
+
+/* Page-header stat blocks: one grid, one tile rhythm (U 附加任务) */
+.stat-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.stat-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stat-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stat-grid-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.stat-grid-6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+@media (max-width: 1279px) {
+  .stat-grid-5,
+  .stat-grid-6 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .stat-grid-3,
+  .stat-grid-4,
+  .stat-grid-5,
+  .stat-grid-6 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stat-tile {
+  height: 96px;
+}
+
+.stat-tile .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+  padding: 12px 16px;
+  overflow: hidden;
+}
+
+.stat-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 18px;
+  min-width: 0;
+}
+
+.stat-tile-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 18px;
+}
+
+.stat-tile-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ark-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stat-tile-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+/* 整组都没有图标时不占位，标签从卡片左缘起排 */
+.stat-grid:not(:has(.stat-tile-icon svg)) .stat-tile-icon {
+  width: 0;
+}
+
+.stat-grid:not(:has(.stat-tile-icon svg)) .stat-tile-label {
+  gap: 0;
+}
+
+.stat-tile-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.stat-tile-value {
+  overflow: hidden;
+  color: var(--ark-ink);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stat-tile-helper,
+.stat-tile-footer {
+  overflow: hidden;
+  color: var(--ark-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stat-tile-helper a,
+.stat-tile-footer a {
+  font-size: 12px;
+}
+
+.stat-tile-blue .stat-tile-value {
+  color: var(--ark-blue);
+}
+
+.stat-tile-green .stat-tile-value {
+  color: var(--ark-green);
+}
+
+.stat-tile-amber .stat-tile-value {
+  color: var(--ark-amber);
+}
+
+.stat-tile-red .stat-tile-value {
+  color: var(--ark-red);
+}
+
+.stat-tile-purple .stat-tile-value {
+  color: var(--ark-purple);
+}
+
+.stat-tile-orange .stat-tile-value {
+  color: var(--ark-orange);
+}
+
+.stat-tile-muted .stat-tile-value {
+  color: var(--ark-muted);
 }
 
 .table-action-wrap {
@@ -1038,6 +1231,9 @@ body {
   padding: 48px 0;
 }
 
+/* hex-audit-off — letterbox behind the embedded kiosk login stream: the remote
+   login page always paints white, so the frame must stay a fixed near-black
+   "screen bezel" in both themes (same exemption as the login showcase hero). */
 .pdd-login-stream-frame {
   position: relative;
   width: 100%;
@@ -1047,6 +1243,7 @@ body {
   border: 1px solid var(--ark-border);
   background: #0b0c0f;
 }
+/* hex-audit-on */
 
 .pdd-login-stream-frame iframe {
   position: absolute;
@@ -2380,6 +2577,50 @@ body {
   font-size: 17px;
 }
 
+/* U5.1.2 首屏经营快照：运营台卡片内的结论条，不改「先人后数」的块顺序 */
+.dashboard-snapshot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ark-panel-soft);
+  font-size: 12px;
+}
+
+.dashboard-snapshot-scope {
+  color: var(--ark-muted);
+}
+
+.dashboard-snapshot-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--ark-muted);
+  white-space: nowrap;
+}
+
+.dashboard-snapshot-metric > strong {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ark-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-snapshot-delta {
+  color: var(--ark-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-snapshot-more {
+  margin-left: auto;
+  padding: 0;
+  height: auto;
+  font-size: 12px;
+}
+
 .ai-business-brief {
   height: 100%;
   background: linear-gradient(145deg, color-mix(in srgb, var(--ark-blue) 8%, var(--ark-panel)), color-mix(in srgb, var(--ark-purple) 6%, var(--ark-panel)));
@@ -2435,6 +2676,27 @@ body {
   font-size: 12px;
 }
 
+/* U1.2 Agent 首屏结论：一句状态 + 一句「为什么还没开通」，在指标卡之前先给判断 */
+.agent-conclusion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ark-ink);
+  background: var(--ark-panel-soft);
+  border-left: 3px solid var(--ark-blue);
+  border-radius: 8px;
+}
+
+.agent-conclusion-note {
+  font-size: 12px;
+  color: var(--ark-muted);
+}
+
 @media (max-width: 768px) {
   .page-title-row {
     align-items: flex-start;
@@ -2447,5 +2709,36 @@ body {
   .page-title-actions {
     min-height: 0;
     justify-content: flex-start;
+  }
+}
+
+/* U5.2 动效克制：系统「减少动态效果」是全站唯一口径。
+   此前只有 DashboardPage 的滚动链接用内联 matchMedia 判断，其余动效一律不认这个偏好：
+   卡片 hover 上浮、终端光标闪烁、同步图标旋转、antd 弹层过渡都照常播。
+   这里做两件事：
+   1) 过渡时长归零（不是删属性）：hover / focus 的终态颜色仍然立即生效，状态区分不丢，
+      只是不再播过程；`scroll-behavior` 一并回到 auto，锚点跳转不滑行。
+   2) 装饰性无限动画停播：终端光标、同步图标不再循环。两者都另有文字（「正在智能同步店铺数据」、
+      进度百分比、日志行）承载状态，停播不丢信息；加载类 spinner 不在此列，仍在转，否则进度看起来像卡死。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .onboarding-journey-card:hover,
+  .login-account-card:hover,
+  .business-kpi-card:hover {
+    transform: none;
+  }
+
+  .agent-live-cursor {
+    animation: none;
+  }
+
+  .onboarding-sync-orbit.is-running .anticon {
+    animation: none;
   }
 }

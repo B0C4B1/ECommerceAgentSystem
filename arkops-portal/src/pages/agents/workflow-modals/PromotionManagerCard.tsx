@@ -130,10 +130,10 @@ export function PromotionManagerCard() {
   return (
     <>
       <Card
-        style={{ marginBottom: 16, borderTop: '3px solid #dc2626' }}
+        style={{ marginBottom: 16, borderTop: '3px solid var(--ark-red)' }}
         title={
           <Space>
-            <GiftOutlined style={{ color: '#dc2626' }} />
+            <GiftOutlined style={{ color: 'var(--ark-red)' }} />
             {t('promo.managerTitle')}
             <Badge status="processing" />
             <Tag color="red" style={{ fontSize: 11 }}>{t('promo.lastScan')}: {lastScan}</Tag>

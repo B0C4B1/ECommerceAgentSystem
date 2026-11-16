@@ -29,7 +29,7 @@ import {
   message,
 } from 'antd';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { operatingModelApi, type AccountAllocation } from '../../api/operatingModel';
 import { orchestratorApi, type StorePortfolioRow } from '../../api/orchestrator';
 import { useAuth } from '../../app/auth';
@@ -112,7 +112,7 @@ function AccountGoalSection({
   return (
     <div style={{ marginBottom: 12 }}>
       <Space size={8} wrap>
-        <AimOutlined style={{ color: '#2563eb' }} />
+        <AimOutlined style={{ color: 'var(--ark-blue)' }} />
         <Typography.Text strong>{t('accountGoal.title')}</Typography.Text>
         {accountGoal ? (
           <Tag color="blue">
@@ -254,7 +254,7 @@ function AccountGoalSection({
                   row.delta === 0 ? (
                     <Typography.Text type="secondary">—</Typography.Text>
                   ) : (
-                    <Typography.Text style={{ color: row.delta > 0 ? '#16a34a' : '#dc2626' }}>
+                    <Typography.Text style={{ color: row.delta > 0 ? 'var(--ark-green)' : 'var(--ark-red)' }}>
                       {row.delta > 0 ? '+' : '-'}
                       {formatMoney(Math.abs(row.delta))}
                     </Typography.Text>
@@ -352,7 +352,7 @@ function AccountGuardSection({ storeIds }: { storeIds: AllMallId[] }) {
   return (
     <div style={{ marginBottom: 12 }}>
       <Space size={8} wrap>
-        <SafetyCertificateOutlined style={{ color: '#2563eb' }} />
+        <SafetyCertificateOutlined style={{ color: 'var(--ark-blue)' }} />
         <Typography.Text strong>{t('accountGuard.title')}</Typography.Text>
         {view.pendingCount > 0 ? (
           <Tag color="orange">
@@ -490,7 +490,7 @@ function AccountGuardSection({ storeIds }: { storeIds: AllMallId[] }) {
                 align: 'right' as const,
                 render: (_: unknown, row: (typeof view.rows)[number]) =>
                   row.blocks7d > 0 ? (
-                    <Typography.Text style={{ color: '#dc2626' }}>{row.blocks7d}</Typography.Text>
+                    <Typography.Text style={{ color: 'var(--ark-red)' }}>{row.blocks7d}</Typography.Text>
                   ) : (
                     <Typography.Text type="secondary">—</Typography.Text>
                   ),
@@ -556,6 +556,7 @@ function AccountGuardSection({ storeIds }: { storeIds: AllMallId[] }) {
 export function PortfolioGoalsCard() {
   const { t } = useI18n();
   const { stores, scope, setScope, activeStore } = useStoreScope();
+  const navigate = useNavigate();
   const storeIds = stores.map((store) => store.id);
 
   const { data: rows = [] } = useQuery({
@@ -650,7 +651,7 @@ export function PortfolioGoalsCard() {
             align: 'right' as const,
             render: (value: number, row: StorePortfolioRow) => (
               <div>
-                <Typography.Text strong style={{ color: value > 0 ? '#16a34a' : undefined }}>
+                <Typography.Text strong style={{ color: value > 0 ? 'var(--ark-green)' : undefined }}>
                   +{formatMoney(value)}
                 </Typography.Text>
                 {row.realizedThisWeek > 0 && (
@@ -682,7 +683,7 @@ export function PortfolioGoalsCard() {
                 ((row.attributedThisWeek - row.attributedLastWeek) / row.attributedLastWeek) * 100,
               );
               return (
-                <Typography.Text strong style={{ color: pct >= 0 ? '#16a34a' : '#dc2626' }}>
+                <Typography.Text strong style={{ color: pct >= 0 ? 'var(--ark-green)' : 'var(--ark-red)' }}>
                   {pct >= 0 ? '▲' : '▼'} {Math.abs(pct)}%
                 </Typography.Text>
               );
@@ -745,11 +746,9 @@ export function PortfolioGoalsCard() {
               <Tag color="green">{t('portfolio.crossAllDecided')}</Tag>
             )}
             {pendingPlans > 0 && (
-              <Link to="/inbox">
-                <Button size="small" type="primary">
-                  {t('portfolio.crossGoInbox')}
-                </Button>
-              </Link>
+              <Button size="small" type="primary" onClick={() => navigate('/inbox')}>
+                {t('portfolio.crossGoInbox')}
+              </Button>
             )}
           </Space>
           <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>

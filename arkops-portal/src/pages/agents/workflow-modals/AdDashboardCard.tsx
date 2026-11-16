@@ -68,7 +68,7 @@ export function AdDashboardCard() {
       dataIndex: 'roi',
       width: 80,
       render: (v: number) => {
-        const color = v >= 1.5 ? '#16a34a' : v >= 1.0 ? '#f59e0b' : '#dc2626';
+        const color = v >= 1.5 ? 'var(--ark-green)' : v >= 1.0 ? 'var(--ark-amber)' : 'var(--ark-red)';
         return <Typography.Text style={{ fontSize: 13, color, fontWeight: 600 }}>{v.toFixed(2)}×</Typography.Text>;
       },
     },
@@ -85,10 +85,10 @@ export function AdDashboardCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #2563eb' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-blue)' }}
       title={
         <Space>
-          <ThunderboltOutlined style={{ color: '#2563eb' }} />
+          <ThunderboltOutlined style={{ color: 'var(--ark-blue)' }} />
           {t('ads.dashboardTitle')}
           <Badge status="processing" />
           <Tag color="blue" style={{ fontSize: 11 }}>{t('ads.lastPatrol')}: {lastPatrol}</Tag>

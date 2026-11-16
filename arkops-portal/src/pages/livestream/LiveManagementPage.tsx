@@ -8,7 +8,7 @@ import {
   PlayCircleOutlined, ClockCircleOutlined, CheckCircleOutlined,
   FileTextOutlined, PictureOutlined, DatabaseOutlined,
 } from '@ant-design/icons';
-import { Button, Card, Col, Collapse, Empty, Modal, Row, Segmented, Space, Statistic, Table, Tag, Tabs, Typography, message } from 'antd';
+import { Button, Card, Collapse, Empty, Modal, Segmented, Space, Table, Tag, Tabs, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { livestreamApi } from '../../api/livestream';
@@ -16,6 +16,7 @@ import { storesApi } from '../../api/stores';
 import { useI18n } from '../../app/i18n';
 import { useStoreScope } from '../../app/storeScope';
 import { PageHeader } from '../../components/PageHeader';
+import { StatTile } from '../../components/metrics/MetricCard';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import type { ContentMaterial, LiveScript, LiveSession } from '../../types/domain';
 
@@ -78,12 +79,12 @@ export function LiveManagementPage() {
       <PageHeader title={t('nav.live')} description={t('live.subtitle')} />
 
       {/* Stats */}
-      <Row gutter={[12, 12]} style={{ padding: '0 24px', marginBottom: 12 }}>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.liveCount')} value={live ? 1 : 0} valueStyle={{ color: 'var(--ark-red)', fontSize: 20 }} /></Card></Col>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.upcomingCount')} value={upcoming.length} valueStyle={{ color: '#1890ff', fontSize: 20 }} /></Card></Col>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.endedCount')} value={scopedSessions.filter((s) => s.status === 'ended').length} /></Card></Col>
-        <Col xs={12} sm={6}><Card size="small"><Statistic title={t('live.totalRevenue')} value={`¥${(totalRevenue / 10000).toFixed(1)}万`} valueStyle={{ color: 'var(--ark-purple)', fontSize: 20 }} /></Card></Col>
-      </Row>
+      <div className="stat-grid stat-grid-4" style={{ padding: '0 24px' }}>
+        <StatTile label={t('live.liveCount')} value={live ? 1 : 0} tone="red" />
+        <StatTile label={t('live.upcomingCount')} value={upcoming.length} tone="blue" />
+        <StatTile label={t('live.endedCount')} value={scopedSessions.filter((s) => s.status === 'ended').length} />
+        <StatTile label={t('live.totalRevenue')} value={`¥${(totalRevenue / 10000).toFixed(1)}万`} tone="purple" />
+      </div>
 
       {/* Live now alert */}
       {live && (

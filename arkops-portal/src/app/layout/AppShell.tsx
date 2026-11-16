@@ -441,7 +441,7 @@ export function AppShell() {
                 textAlign: 'left',
                 padding: '8px 6px',
                 border: 'none',
-                borderLeft: notice.readAt ? '3px solid transparent' : '3px solid var(--ark-blue, #1677ff)',
+                borderLeft: notice.readAt ? '3px solid transparent' : '3px solid var(--ark-blue)',
                 background: 'transparent',
                 cursor: 'pointer',
               }}

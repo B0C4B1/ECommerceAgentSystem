@@ -34,7 +34,7 @@ export function RecognitionResultCard({
 
   return (
     <Card
-      title={<><EditOutlined style={{ marginRight: 8, color: '#16a34a' }} />{t('agent.recognizeResult')}</>}
+      title={<><EditOutlined style={{ marginRight: 8, color: 'var(--ark-green)' }} />{t('agent.recognizeResult')}</>}
       extra={
         <Space>
           <Tag color="green" style={{ fontSize: 11 }}>
@@ -45,7 +45,7 @@ export function RecognitionResultCard({
           </Button>
         </Space>
       }
-      style={{ marginBottom: 16, borderLeft: '3px solid #16a34a' }}
+      style={{ marginBottom: 16, borderLeft: '3px solid var(--ark-green)' }}
     >
       <Row gutter={[16, 12]}>
         <Col xs={24} sm={16}>

@@ -1,11 +1,12 @@
 import { LinkOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Form, Input, Modal, Select, Skeleton, Space, Switch, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { notificationsApi } from '../../api/notifications';
 import { useI18n } from '../../app/i18n';
 import { usePermission } from '../../app/usePermission';
+import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
 import type { NotificationChannelConfig, NotificationChannelType, NotificationEventKey } from '../../types/domain';
 
@@ -31,7 +32,13 @@ export function NotificationsSettingsPage() {
   const [endpointChannel, setEndpointChannel] = useState<NotificationChannelConfig | null>(null);
   const [endpointForm] = Form.useForm();
 
-  const { data: channels = [] } = useQuery({ queryKey: ['notification-channels'], queryFn: notificationsApi.listChannels });
+  // U7.1：三态分明——读取中给骨架、失败说「读不出来 ≠ 没有」、只有成功且确实为空才说「还没有」。
+  const channelsQuery = useQuery({
+    queryKey: ['notification-channels'],
+    queryFn: notificationsApi.listChannels,
+    retry: 1
+  });
+  const channels = channelsQuery.data ?? [];
 
   const toggleMutation = useMutation({
     mutationFn: (params: { channelId: string; event: NotificationEventKey; enabled: boolean }) =>
@@ -157,7 +164,19 @@ export function NotificationsSettingsPage() {
           ) : undefined
         }
       />
-      {channels.length === 0 && (
+      {channelsQuery.isLoading ? (
+        <Card size="small" title={t('notify.matrixTitle')}>
+          <Skeleton active paragraph={{ rows: 4 }} />
+        </Card>
+      ) : channelsQuery.isError ? (
+        <Card size="small">
+          <EmptyState
+            description={t('settings.notificationsLoadFailed')}
+            actionText={t('settings.notificationsLoadRetry')}
+            onAction={() => channelsQuery.refetch()}
+          />
+        </Card>
+      ) : channels.length === 0 ? (
         <Alert
           type="info"
           showIcon
@@ -170,20 +189,21 @@ export function NotificationsSettingsPage() {
             ) : undefined
           }
         />
+      ) : (
+        <Card title={t('notify.matrixTitle')}>
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
+            {t('notify.matrixDesc')}
+          </Typography.Paragraph>
+          <Table
+            rowKey="key"
+            columns={columns}
+            dataSource={EVENT_ROWS}
+            pagination={false}
+            size="middle"
+            scroll={{ x: 640 }}
+          />
+        </Card>
       )}
-      <Card title={t('notify.matrixTitle')}>
-        <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
-          {t('notify.matrixDesc')}
-        </Typography.Paragraph>
-        <Table
-          rowKey="key"
-          columns={columns}
-          dataSource={EVENT_ROWS}
-          pagination={false}
-          size="middle"
-          scroll={{ x: 640 }}
-        />
-      </Card>
 
       <Modal
         title={t('notify.setEndpoint')}

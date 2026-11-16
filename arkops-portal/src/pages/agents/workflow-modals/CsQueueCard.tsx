@@ -95,10 +95,10 @@ export function CsQueueCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #16a34a' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-green)' }}
       title={
         <Space>
-          <CustomerServiceOutlined style={{ color: '#16a34a' }} />
+          <CustomerServiceOutlined style={{ color: 'var(--ark-green)' }} />
           {t('cs.queueTitle')}
           <Badge status="processing" />
           <Tag color="green" style={{ fontSize: 11 }}>{t('cs.lastProcess')}: {lastProcess}</Tag>

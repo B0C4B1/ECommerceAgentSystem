@@ -48,7 +48,7 @@ export function PlansSection() {
   });
 
   const tiers: SubscriptionPlan['tier'][] = ['Free', 'Starter', 'Professional', 'Enterprise'];
-  const colorMap: Record<string, string> = { Free: '#94a3b8', Starter: '#2563eb', Professional: '#7c3aed', Enterprise: '#ea580c' };
+  const colorMap: Record<string, string> = { Free: 'var(--ark-muted)', Starter: 'var(--ark-blue)', Professional: 'var(--ark-purple)', Enterprise: 'var(--ark-orange)' };
 
   const planMap = new Map(allPlans?.map((p) => [p.tier, p]));
 
@@ -92,8 +92,8 @@ export function PlansSection() {
         }
         if (typeof val === 'boolean') {
           return val
-            ? <CheckCircleOutlined style={{ color: '#16a34a', fontSize: 16 }} />
-            : <CloseOutlined style={{ color: '#dc2626', fontSize: 16 }} />;
+            ? <CheckCircleOutlined style={{ color: 'var(--ark-green)', fontSize: 16 }} />
+            : <CloseOutlined style={{ color: 'var(--ark-red)', fontSize: 16 }} />;
         }
         return <span>{val}</span>;
       },
@@ -197,7 +197,7 @@ export function CurrentPlanSection() {
     <Card title={<><CrownOutlined /> {t('subscription.currentPlan')}</>} style={{ marginBottom: 24 }}>
       <Row gutter={[24, 16]}>
         <Col xs={24} sm={12} lg={6}>
-          <Statistic title={t('subscription.currentPlan')} value={currentPlan?.tier ?? '-'} valueStyle={{ color: '#2563eb', fontWeight: 700 }} />
+          <Statistic title={t('subscription.currentPlan')} value={currentPlan?.tier ?? '-'} valueStyle={{ color: 'var(--ark-blue)', fontWeight: 700 }} />
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Statistic title={t('subscription.nextBillDate')} value={computeNextBillDate()} valueStyle={{ fontWeight: 600 }} />
@@ -225,7 +225,7 @@ export function PaymentMethodsSection() {
     <Card title={<><WalletOutlined /> {t('subscription.paymentMethods')}</>} style={{ marginBottom: 24 }}>
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={8}>
-          <Card size="small" className="stat-card stat-card-primary" style={{ borderLeft: '3px solid #2563eb' }}>
+          <Card size="small" className="stat-card stat-card-primary" style={{ borderLeft: '3px solid var(--ark-blue)' }}>
             <div className="stat-card-icon"><CreditCardOutlined /></div>
             <Typography.Text strong>{t('subscription.creditCard')}</Typography.Text>
             <br />
@@ -235,7 +235,7 @@ export function PaymentMethodsSection() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card size="small" className="stat-card stat-card-purple" style={{ borderLeft: '3px solid #7c3aed' }}>
+          <Card size="small" className="stat-card stat-card-purple" style={{ borderLeft: '3px solid var(--ark-purple)' }}>
             <div className="stat-card-icon"><BankOutlined /></div>
             <Typography.Text strong>{t('subscription.bankTransfer')}</Typography.Text>
             <br />
@@ -243,7 +243,7 @@ export function PaymentMethodsSection() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card size="small" className="stat-card stat-card-success" style={{ borderLeft: '3px solid #0f766e' }}>
+          <Card size="small" className="stat-card stat-card-success" style={{ borderLeft: '3px solid var(--ark-teal)' }}>
             <div className="stat-card-icon"><SwapOutlined /></div>
             <Typography.Text strong>{t('subscription.transfer')}</Typography.Text>
             <br />
@@ -370,7 +370,7 @@ export function PrivateDeploySection() {
     >
       <Row gutter={[24, 16]}>
         <Col xs={24} sm={8}>
-          <Card size="small" className="stat-card stat-card-primary" style={{ borderLeft: '3px solid #2563eb', height: '100%' }}>
+          <Card size="small" className="stat-card stat-card-primary" style={{ borderLeft: '3px solid var(--ark-blue)', height: '100%' }}>
             <div className="stat-card-icon"><BankOutlined /></div>
             <Typography.Title level={5}>{t('subscription.privateDeployTitle')}</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0 }}>
@@ -379,7 +379,7 @@ export function PrivateDeploySection() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card size="small" className="stat-card stat-card-purple" style={{ borderLeft: '3px solid #7c3aed', height: '100%' }}>
+          <Card size="small" className="stat-card stat-card-purple" style={{ borderLeft: '3px solid var(--ark-purple)', height: '100%' }}>
             <div className="stat-card-icon"><RocketOutlined /></div>
             <Typography.Title level={5}>{t('subscription.agentCustom')}</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0 }}>
@@ -388,7 +388,7 @@ export function PrivateDeploySection() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card size="small" className="stat-card stat-card-success" style={{ borderLeft: '3px solid #0f766e', height: '100%' }}>
+          <Card size="small" className="stat-card stat-card-success" style={{ borderLeft: '3px solid var(--ark-teal)', height: '100%' }}>
             <div className="stat-card-icon"><CrownOutlined /></div>
             <Typography.Title level={5}>{t('subscription.modelCustom')}</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0 }}>
@@ -399,7 +399,7 @@ export function PrivateDeploySection() {
       </Row>
       <Row gutter={[24, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} sm={8}>
-          <Card size="small" className="stat-card stat-card-warning" style={{ borderLeft: '3px solid #ea580c', height: '100%' }}>
+          <Card size="small" className="stat-card stat-card-warning" style={{ borderLeft: '3px solid var(--ark-orange)', height: '100%' }}>
             <div className="stat-card-icon"><TeamOutlined /></div>
             <Typography.Title level={5}>{t('subscription.premiumSupport')}</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0 }}>
@@ -408,7 +408,7 @@ export function PrivateDeploySection() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card size="small" className="stat-card stat-card-success" style={{ borderLeft: '3px solid #16a34a', height: '100%' }}>
+          <Card size="small" className="stat-card stat-card-success" style={{ borderLeft: '3px solid var(--ark-green)', height: '100%' }}>
             <div className="stat-card-icon"><ShopOutlined /></div>
             <Typography.Title level={5}>{t('subscription.dataIsolation')}</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0 }}>

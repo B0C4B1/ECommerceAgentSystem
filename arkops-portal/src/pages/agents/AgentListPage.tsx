@@ -24,7 +24,9 @@ import { EnableAllReviewModal } from '../../components/agents/EnableAllReviewMod
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
 import { usePermission } from '../../app/usePermission';
+import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
+import { TablePageSkeleton } from '../../components/PageSkeleton';
 import { StatusBadge } from '../../components/StatusBadge';
 import { StoreConnectionEmptyState } from '../../components/StoreConnectionEmptyState';
 import { MetricCard } from '../../components/metrics/MetricCard';
@@ -56,7 +58,10 @@ export function AgentListPage() {
   const navigate = useNavigate();
   const canUpdateAgents = can('agents', 'update');
   const queryClient = useQueryClient();
-  const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: agentsApi.list });
+  // U6.2：目录没读到时不能渲染「已开通 0/0 · 没有待开通项」这种结论。
+  // 查询改为持有生命周期，并把重试压到 1 次，失败约 1s 内交给用户重试。
+  const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: agentsApi.list, retry: 1 });
+  const { data: agents = [] } = agentsQuery;
   const [searchText, setSearchText] = useState('');
   // WS-D (D4): risk-grouped bulk-enable review modal + shared pre-enable drawer
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
@@ -69,10 +74,12 @@ export function AgentListPage() {
       )
     : agents;
 
-  const { data: trialStatus } = useQuery({
+  const trialStatusQuery = useQuery({
     queryKey: ['trialStatus'],
     queryFn: financeApi.getTrialStatus,
+    retry: 1,
   });
+  const { data: trialStatus } = trialStatusQuery;
 
   const isPremiumLocked = (agentType: string) => {
     return trialStatus?.premiumAgents.includes(agentType) ?? false;
@@ -134,17 +141,37 @@ export function AgentListPage() {
       .filter((dep) => !agents.find((a) => a.agentType === dep)?.enabled)
       .map((dep) => t(`agent.${dep}`));
 
+  // U1.2：首屏结论要能自己解释「为什么还没开通」，这里把依赖阻塞的数量算出来，
+  // 与表格里红字依赖提示、批量开通抽屉的自动补齐是同一口径。
+  const blockedByDeps =
+    disabledAgents > 0
+      ? agents.filter((a) => !a.enabled && !isPremiumLocked(a.agentType) && getMissingDeps(a).length > 0)
+          .length
+      : 0;
+
+  // 首屏那句「x/15」必须能对上账：未开通的里面还有一类是套餐没解锁的，
+  // 不写出来人会自己算 15-4=11，和「7 个可开通」对不上，又得多解读一次。
+  const lockedCount = agents.filter((a) => !a.enabled && isPremiumLocked(a.agentType)).length;
+  const conclusionNotes = [
+    lockedCount > 0 ? t('agent.conclusionLocked', { locked: lockedCount }) : '',
+    blockedByDeps > 0 ? t('agent.conclusionDeps', { blocked: blockedByDeps }) : '',
+  ].filter(Boolean);
+
   const riskControl = agents.find((a) => a.agentType === 'risk_control');
   const riskControlOn = riskControl?.enabled === true;
   const isGuarded = (agent: AgentListItem) =>
     riskControlOn && agent.agentType !== 'risk_control' && agent.agentType !== 'finance_audit';
 
   // ===== 汇总指标 =====
+  // U6.2：四张指标卡是目录级结论，搜索只筛表格、不改统计——
+  // 否则搜一个不存在的名字会让首屏变成「已开通 0/15 · 可开通 0」，与同屏「7 个现在就能开通」自相矛盾。
+  const enabledAgents = agents.filter((a) => a.enabled);
+  const allDisabledAgents = agents.filter((a) => !a.enabled);
   const enabledList = filteredAgents.filter((a) => a.enabled);
   const disabledList = filteredAgents.filter((a) => !a.enabled);
-  const totalActiveTasks = enabledList.reduce((sum, a) => sum + (a.activeTaskCount ?? 0), 0);
-  const avgSuccessRate = enabledList.length > 0
-    ? Math.round(enabledList.reduce((sum, a) => sum + (a.runStats?.successRate ?? 0), 0) / enabledList.length)
+  const totalActiveTasks = enabledAgents.reduce((sum, a) => sum + (a.activeTaskCount ?? 0), 0);
+  const avgSuccessRate = enabledAgents.length > 0
+    ? Math.round(enabledAgents.reduce((sum, a) => sum + (a.runStats?.successRate ?? 0), 0) / enabledAgents.length)
     : 0;
   const layerCounts: Record<AgentLayer, { total: number; enabled: number }> = {
     foundation: { total: 0, enabled: 0 },
@@ -323,24 +350,93 @@ export function AgentListPage() {
     );
   }
 
+  // U6.2 三态之一：读取中。目录与套餐状态都没到齐之前不渲染 0 / 「没有待开通项」。
+  if (agentsQuery.isLoading || trialStatusQuery.isLoading) {
+    return <TablePageSkeleton />;
+  }
+
+  // U6.2 三态之二：读取失败。明确「不是没有 Agent」，并就地重试，不用刷新整页。
+  if (agentsQuery.isError || trialStatusQuery.isError) {
+    return (
+      <div className="page-stack">
+        <PageHeader title={t('agent.title')} description={t('agent.description')} />
+        <Card size="small">
+          <EmptyState
+            description={t('agentsv2.loadFailed')}
+            actionText={t('agentsv2.loadRetry')}
+            onAction={() => {
+              void agentsQuery.refetch();
+              void trialStatusQuery.refetch();
+            }}
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  // U6.2 三态之三：确实为空（读到 0 条），只在成功且为空时出现。
+  if (agents.length === 0) {
+    return (
+      <div className="page-stack">
+        <PageHeader title={t('agent.title')} description={t('agent.description')} />
+        <Card size="small">
+          <EmptyState
+            description={t('agentsv2.emptyCatalog')}
+            actionText={t('agentsv2.loadRetry')}
+            onAction={() => void agentsQuery.refetch()}
+          />
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="page-stack">
       <PageHeader
         title={t('agent.title')}
         description={t('agent.description')}
         actions={
-          <Button icon={<ThunderboltOutlined />} onClick={() => navigate('/setup')}>
-            {t('agent.backToSetup')}
-          </Button>
+          <Space size={8} wrap>
+            <Button icon={<SettingOutlined />} onClick={() => navigate('/setup')}>
+              {t('agent.backToSetup')}
+            </Button>
+            {/* U1.2：页头只留一个主动作，和首屏结论说的是同一件事（还差几个、点一下就开）。 */}
+            {disabledAgents > 0 && canUpdateAgents && (
+              <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => setBulkModalOpen(true)}>
+                {t('agent.bulkEnableCta', { count: disabledAgents })}
+              </Button>
+            )}
+          </Space>
         }
       />
+
+      {/* ===== 首屏结论：现在什么情况 → 还差什么 → 系统会不会自动补齐 ===== */}
+      <div className="agent-conclusion">
+        <span>
+          {disabledAgents > 0
+            ? t('agent.conclusionPending', {
+                enabled: enabledAgents.length,
+                total: agents.length,
+                tasks: totalActiveTasks,
+                count: disabledAgents,
+              })
+            : t('agent.conclusionReady', {
+                enabled: enabledAgents.length,
+                total: agents.length,
+                tasks: totalActiveTasks,
+              })}
+        </span>
+        {conclusionNotes.length > 0 && (
+          <span className="agent-conclusion-note">{conclusionNotes.join(' · ')}</span>
+        )}
+      </div>
 
       {/* ===== 汇总指标 ===== */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col xs={12} sm={6}>
           <MetricCard
             title={t('agent.enabledAgents')}
-            value={enabledList.length}
+            value={enabledAgents.length}
             suffix={`/ ${agents.length}`}
             overlayIcon={<CheckCircleOutlined style={{ color: 'var(--ark-green)' }} />}
             valueStyle={{ color: 'var(--ark-green)' }}
@@ -361,7 +457,7 @@ export function AgentListPage() {
         <Col xs={12} sm={6}>
           <MetricCard
             title={t('agent.availableAgents')}
-            value={disabledList.length}
+            value={allDisabledAgents.length}
             overlayIcon={<PlusOutlined style={{ color: 'var(--ark-blue)' }} />}
             valueStyle={{ color: 'var(--ark-blue)' }}
             helper={disabledAgents > 0 ? `${disabledAgents} ${t('agent.canEnable')}` : t('agent.allEnabled')}
@@ -373,7 +469,7 @@ export function AgentListPage() {
             value={totalActiveTasks}
             overlayIcon={<RocketOutlined style={{ color: 'var(--ark-purple)' }} />}
             valueStyle={{ color: 'var(--ark-purple)' }}
-            helper={`${enabledList.filter(a => (a.activeTaskCount ?? 0) > 0).length} ${t('agent.agentsRunning')}`}
+            helper={`${enabledAgents.filter(a => (a.activeTaskCount ?? 0) > 0).length} ${t('agent.agentsRunning')}`}
           />
         </Col>
         <Col xs={12} sm={6}>
@@ -402,12 +498,18 @@ export function AgentListPage() {
           allowClear
           style={{ maxWidth: 400 }}
         />
-        {disabledAgents > 0 && canUpdateAgents && (
-          <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => setBulkModalOpen(true)}>
-            {t('agenttrust.bulkEnableButton')} ({disabledAgents})
-          </Button>
-        )}
       </div>
+
+      {/* U6.2：搜索无结果时给专属空态与下一步，不再只剩一块空白。 */}
+      {searchText.trim() && filteredAgents.length === 0 && (
+        <Card size="small" style={{ marginBottom: 16 }}>
+          <EmptyState
+            description={t('agentsv2.emptySearch', { keyword: searchText.trim() })}
+            actionText={t('agentsv2.clearSearch')}
+            onAction={() => setSearchText('')}
+          />
+        </Card>
+      )}
 
       {/* WS-D (D4): risk-grouped bulk-enable review modal */}
       <EnableAllReviewModal
@@ -506,7 +608,7 @@ export function AgentListPage() {
         }}>
           <CheckCircleOutlined style={{ color: 'var(--ark-green)' }} />
           <Typography.Text style={{ fontSize: 12 }}>
-            <span dangerouslySetInnerHTML={{ __html: t('agent.enabledCount', { count: enabledList.length, total: agents.length }) }} />
+            <span dangerouslySetInnerHTML={{ __html: t('agent.enabledCount', { count: enabledAgents.length, total: agents.length }) }} />
           </Typography.Text>
           <div style={{ flex: 1 }} />
           <Space size={12}>

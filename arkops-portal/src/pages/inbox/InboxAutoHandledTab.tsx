@@ -30,7 +30,7 @@ import type { AuditLog } from '../../types/domain';
 import type { ExceptionItem } from '../operations/exceptionCenterMockData';
 
 /** 回执窗口：只列近 7 天，避免把上古操作当「今天替你做的」。 */
-const WINDOW_DAYS = 7;
+export const AUTO_HANDLED_WINDOW_DAYS = 7;
 
 /**
  * P41.1：谁算「Agent」。
@@ -69,6 +69,22 @@ function isGovernanceAudit(log: AuditLog): boolean {
   return log.actor.startsWith('Agent（') || log.actor === 'Orchestrator';
 }
 
+/**
+ * 近 7 天「系统替你处理了」的回执行。
+ *
+ * U1.3：tab 内容与 tab 上的计数徽标共用这一处筛选，保证「首屏看到的条数」与
+ * 「点进去看到的行数」永远一致，不各自维护一套口径。
+ *
+ * Author: TBD
+ * Created: 2026-11-14
+ */
+export function getAutoHandledRows(logs: AuditLog[]): AuditLog[] {
+  const since = dayjs().subtract(AUTO_HANDLED_WINDOW_DAYS, 'day');
+  return logs
+    .filter((log) => isAgentAudit(log) && isReceiptAudit(log) && dayjs(log.at).isAfter(since))
+    .sort((a, b) => dayjs(b.at).valueOf() - dayjs(a.at).valueOf());
+}
+
 export function InboxAutoHandledTab({
   onShowPending,
   onCheckEscalation,
@@ -81,12 +97,7 @@ export function InboxAutoHandledTab({
   const { data: auditLogs = [] } = useQuery({ queryKey: ['audit-logs'], queryFn: auditLogsApi.list });
   const { data: exceptions = [] } = useQuery({ queryKey: ['exceptions'], queryFn: exceptionsApi.list });
 
-  const rows = useMemo(() => {
-    const since = dayjs().subtract(WINDOW_DAYS, 'day');
-    return auditLogs
-      .filter((log) => isAgentAudit(log) && isReceiptAudit(log) && dayjs(log.at).isAfter(since))
-      .sort((a, b) => dayjs(b.at).valueOf() - dayjs(a.at).valueOf());
-  }, [auditLogs]);
+  const rows = useMemo(() => getAutoHandledRows(auditLogs), [auditLogs]);
 
   const summary = useMemo(() => {
     const governance = rows.filter(isGovernanceAudit).length;
@@ -160,7 +171,7 @@ export function InboxAutoHandledTab({
             <ThunderboltOutlined style={{ color: 'var(--ark-purple)' }} />
             <Typography.Text strong>{t('inbox.autoSummaryTitle')}</Typography.Text>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {t('inbox.autoWindow', { days: WINDOW_DAYS })}
+              {t('inbox.autoWindow', { days: AUTO_HANDLED_WINDOW_DAYS })}
             </Typography.Text>
             <Typography.Text style={{ fontSize: 13 }}>
               <CheckCircleOutlined style={{ color: 'var(--ark-green)', marginRight: 4 }} />
@@ -197,7 +208,7 @@ export function InboxAutoHandledTab({
         dataSource={rows}
         pagination={{ pageSize: 10, size: 'small' }}
         cardProps={{ title: t('inbox.autoLogTitle') }}
-        description={t('inbox.autoLogHint', { days: WINDOW_DAYS })}
+        description={t('inbox.autoLogHint', { days: AUTO_HANDLED_WINDOW_DAYS })}
         locale={{ emptyText: t('inbox.autoEmpty') }}
       />
     </Space>

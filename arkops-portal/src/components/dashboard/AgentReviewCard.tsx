@@ -255,28 +255,28 @@ export function AgentReviewCard({ storeIds, scopeLabel }: AgentReviewCardProps) 
       key: 'realized',
       label: t('review.realized'),
       value: formatCurrency(realizedAmount),
-      icon: <CheckCircleOutlined style={{ color: '#16a34a' }} />,
+      icon: <CheckCircleOutlined style={{ color: 'var(--ark-green)' }} />,
       hint: t('review.successActions', { count: String(realized.length) }),
     },
     {
       key: 'lost',
       label: t('review.failedActions'),
       value: String(lost.length),
-      icon: <WarningOutlined style={{ color: lost.length > 0 ? '#dc2626' : '#94a3b8' }} />,
+      icon: <WarningOutlined style={{ color: lost.length > 0 ? 'var(--ark-red)' : 'var(--ark-muted)' }} />,
       hint: lost.length > 0 ? t('review.lostImpact', { amount: formatCurrency(lostAmount) }) : t('review.noFailure'),
     },
     {
       key: 'pending',
       label: t('review.pendingActions'),
       value: String(pending.length),
-      icon: <ClockCircleOutlined style={{ color: '#d97706' }} />,
+      icon: <ClockCircleOutlined style={{ color: 'var(--ark-amber)' }} />,
       hint: t('review.pendingHint'),
     },
     {
       key: 'rate',
       label: t('review.fulfillment'),
       value: fulfillment === undefined ? '—' : `${fulfillment}%`,
-      icon: <BarChartOutlined style={{ color: '#2563eb' }} />,
+      icon: <BarChartOutlined style={{ color: 'var(--ark-blue)' }} />,
       hint: t('review.fulfillmentHint'),
     },
   ];
@@ -288,7 +288,7 @@ export function AgentReviewCard({ storeIds, scopeLabel }: AgentReviewCardProps) 
         style={{ marginBottom: 16 }}
         title={
           <Space size={8}>
-            <BarChartOutlined style={{ color: '#2563eb' }} />
+            <BarChartOutlined style={{ color: 'var(--ark-blue)' }} />
             <Typography.Text strong>{t('review.title')}</Typography.Text>
             <Tag>{windowLabel}</Tag>
             {scopeLabel && <Tag color="blue">{scopeLabel}</Tag>}

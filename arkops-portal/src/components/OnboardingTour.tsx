@@ -42,9 +42,9 @@ function clearTourPending() {
 }
 
 const stepIcons = [
-  <AuditOutlined style={{ fontSize: 48, color: '#2563eb' }} />,
-  <RobotOutlined style={{ fontSize: 48, color: '#7c3aed' }} />,
-  <DashboardOutlined style={{ fontSize: 48, color: '#16a34a' }} />,
+  <AuditOutlined style={{ fontSize: 48, color: 'var(--ark-blue)' }} />,
+  <RobotOutlined style={{ fontSize: 48, color: 'var(--ark-purple)' }} />,
+  <DashboardOutlined style={{ fontSize: 48, color: 'var(--ark-green)' }} />,
 ];
 
 /**
@@ -135,9 +135,9 @@ export function OnboardingTour() {
                 width: i === step ? 24 : 8,
                 height: 8,
                 borderRadius: 4,
-                background: i === step ? '#2563eb' : '#d1d5db',
+                background: i === step ? 'var(--ark-blue)' : 'var(--ark-border)',
                 margin: '0 4px',
-                transition: 'all 0.3s',
+                transition: 'width 200ms ease, background-color 200ms ease',
               }}
             />
           ))}

@@ -165,7 +165,7 @@ export function ReviewManagementPage() {
   const columns: ColumnsType<Review> = [
     { title: t('reviews.buyer'), key: 'buyer', width: 100, render: (_: unknown, r: Review) => (
       <Space>
-        <Avatar size={28} style={{ background: 'var(--ark-purple-soft)', color: 'var(--ark-purple)' }}>
+        <Avatar size={28} style={{ background: 'color-mix(in srgb, var(--ark-purple) 14%, var(--ark-panel))', color: 'var(--ark-purple)' }}>
           {r.buyerName[0]}
         </Avatar>
         <Typography.Text strong>{r.buyerName}</Typography.Text>
@@ -179,7 +179,7 @@ export function ReviewManagementPage() {
         <div>
           <Typography.Text style={{ fontSize: 13 }}>{text}</Typography.Text>
           {r.reply && (
-            <div style={{ marginTop: 6, padding: '6px 8px', background: 'var(--ark-bg-sink)', borderRadius: 4, borderLeft: '3px solid var(--ark-purple)' }}>
+            <div style={{ marginTop: 6, padding: '6px 8px', background: 'var(--ark-panel-soft)', borderRadius: 4, borderLeft: '3px solid var(--ark-purple)' }}>
               <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('reviews.merchantReply')}：</Typography.Text>
               <Typography.Text style={{ fontSize: 12 }}>{r.reply.content}</Typography.Text>
             </div>
@@ -264,7 +264,7 @@ export function ReviewManagementPage() {
         <Col xs={12} sm={6}>
           <Card size="small"><StatCard
             title={t('reviews.avgRating')} value={avgRating} suffix=" / 5"
-            color={avgRating >= 4 ? '#52c41a' : avgRating >= 3 ? '#faad14' : '#ff4d4f'}
+            color={avgRating >= 4 ? 'var(--ark-green)' : avgRating >= 3 ? 'var(--ark-amber)' : 'var(--ark-red)'}
           /></Card>
         </Col>
         <Col xs={12} sm={6}>
@@ -276,13 +276,13 @@ export function ReviewManagementPage() {
         <Col xs={12} sm={6}>
           <Card size="small"><StatCard
             title={t('reviews.negativeCount')} value={negativeCount} suffix={t('reviews.needAttention')}
-            color={negativeCount > 0 ? '#ff4d4f' : '#52c41a'}
+            color={negativeCount > 0 ? 'var(--ark-red)' : 'var(--ark-green)'}
           /></Card>
         </Col>
         <Col xs={12} sm={6}>
           <Card size="small"><StatCard
             title={t('reviews.unrepliedCount')} value={unrepliedCount} suffix={t('reviews.pending')}
-            color={unrepliedCount > 0 ? '#faad14' : '#52c41a'}
+            color={unrepliedCount > 0 ? 'var(--ark-amber)' : 'var(--ark-green)'}
           /></Card>
         </Col>
       </Row>
@@ -386,7 +386,7 @@ export function ReviewManagementPage() {
       >
         {replyTarget && (
           <>
-            <div style={{ marginBottom: 12, padding: 10, background: 'var(--ark-bg-sink)', borderRadius: 6 }}>
+            <div style={{ marginBottom: 12, padding: 10, background: 'var(--ark-panel-soft)', borderRadius: 6 }}>
               <Space><Avatar size={24}>{replyTarget.buyerName[0]}</Avatar>
                 <Typography.Text strong>{replyTarget.buyerName}</Typography.Text>
                 <StarRating rating={replyTarget.rating} />
@@ -435,7 +435,7 @@ export function ReviewManagementPage() {
                           style={{
                             padding: '5px 8px', marginTop: 3, borderRadius: 4, cursor: 'pointer',
                             fontSize: 12, border: '1px solid var(--ark-border-soft)',
-                            background: replyText === tmpl.text ? 'var(--ark-purple-soft)' : 'var(--ark-bg-surface)',
+                            background: replyText === tmpl.text ? 'color-mix(in srgb, var(--ark-purple) 14%, var(--ark-panel))' : 'var(--ark-panel)',
                           }}
                         >
                           {tmpl.text}

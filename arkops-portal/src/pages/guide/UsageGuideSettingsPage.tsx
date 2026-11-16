@@ -54,7 +54,7 @@ export function UsageGuideSettingsPage() {
       {/* ===== 产品简介 ===== */}
       <Card id={GUIDE_ANCHORS.intro} style={{ marginBottom: 24 }}>
         <Typography.Title level={4}>
-          <RobotOutlined style={{ marginRight: 8, color: '#2563eb' }} />
+          <RobotOutlined style={{ marginRight: 8, color: 'var(--ark-blue)' }} />
           {t('guide.whatIsArkops')}
         </Typography.Title>
         <Typography.Paragraph style={{ fontSize: 13, lineHeight: 1.8 }}>
@@ -106,14 +106,14 @@ export function UsageGuideSettingsPage() {
           <Col span={24}>
             <Card size="small" style={{ background: 'var(--ark-panel-soft)', border: '1px solid var(--ark-border)' }}>
               <Typography.Text style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                共 <Typography.Text strong style={{ color: '#2563eb', fontSize: 18 }}>15</Typography.Text> 个 Agent，按 5 层分布：基础管道 <Tag color="red" style={{ margin: '0 2px' }}>2</Tag> + 支撑服务 <Tag color="purple" style={{ margin: '0 2px' }}>3</Tag> + 流量引擎 <Tag color="blue" style={{ margin: '0 2px' }}>3</Tag> + 增值运营 <Tag color="green" style={{ margin: '0 2px' }}>5</Tag> + 独立服务 <Tag color="orange" style={{ margin: '0 2px' }}>2</Tag>
+                共 <Typography.Text strong style={{ color: 'var(--ark-blue)', fontSize: 18 }}>15</Typography.Text> 个 Agent，按 5 层分布：基础管道 <Tag color="red" style={{ margin: '0 2px' }}>2</Tag> + 支撑服务 <Tag color="purple" style={{ margin: '0 2px' }}>3</Tag> + 流量引擎 <Tag color="blue" style={{ margin: '0 2px' }}>3</Tag> + 增值运营 <Tag color="green" style={{ margin: '0 2px' }}>5</Tag> + 独立服务 <Tag color="orange" style={{ margin: '0 2px' }}>2</Tag>
               </Typography.Text>
             </Card>
           </Col>
         </Row>
 
         {/* 第 1 层：基础管道 */}
-        <Card size="small" style={{ marginBottom: 12, borderLeft: '3px solid #dc2626' }}>
+        <Card size="small" style={{ marginBottom: 12, borderLeft: '3px solid var(--ark-red)' }}>
           <Typography.Text strong>
             <Tag color="red">2</Tag> {t('agent.layer_foundation')} — {t('guide.flowLayer1Title')}
           </Typography.Text>
@@ -127,7 +127,7 @@ export function UsageGuideSettingsPage() {
         </Card>
 
         {/* 第 2 层：支撑服务 */}
-        <Card size="small" style={{ marginBottom: 12, borderLeft: '3px solid #7c3aed' }}>
+        <Card size="small" style={{ marginBottom: 12, borderLeft: '3px solid var(--ark-purple)' }}>
           <Typography.Text strong>
             <Tag color="purple">3</Tag> {t('agent.layer_support')} — {t('guide.flowLayer2Title')}
           </Typography.Text>
@@ -142,7 +142,7 @@ export function UsageGuideSettingsPage() {
         </Card>
 
         {/* 第 3 层：流量引擎 */}
-        <Card size="small" style={{ marginBottom: 12, borderLeft: '3px solid #2563eb' }}>
+        <Card size="small" style={{ marginBottom: 12, borderLeft: '3px solid var(--ark-blue)' }}>
           <Typography.Text strong>
             <Tag color="blue">3</Tag> {t('agent.layer_traffic')} — {t('guide.flowLayer3Title')}
           </Typography.Text>
@@ -157,7 +157,7 @@ export function UsageGuideSettingsPage() {
         </Card>
 
         {/* 第 4 层：增值运营 */}
-        <Card size="small" style={{ marginBottom: 12, borderLeft: '3px solid #16a34a' }}>
+        <Card size="small" style={{ marginBottom: 12, borderLeft: '3px solid var(--ark-green)' }}>
           <Typography.Text strong>
             <Tag color="green">5</Tag> {t('agent.layer_growth')} — {t('guide.flowLayer4Title')}
           </Typography.Text>
@@ -174,7 +174,7 @@ export function UsageGuideSettingsPage() {
         </Card>
 
         {/* 第 5 层：独立服务 */}
-        <Card size="small" style={{ marginBottom: 8, borderLeft: '3px solid #ea580c' }}>
+        <Card size="small" style={{ marginBottom: 8, borderLeft: '3px solid var(--ark-orange)' }}>
           <Typography.Text strong>
             <Tag color="orange">2</Tag> {t('agent.layer_standalone')} — {t('guide.flowLayer5Title')}
           </Typography.Text>
@@ -208,8 +208,8 @@ export function UsageGuideSettingsPage() {
       >
         <Row gutter={[16, 16]}>
           <Col xs={24} md={8}>
-            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid #7c3aed', height: '100%' }}>
-              <Typography.Text strong style={{ color: '#7c3aed' }}>
+            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid var(--ark-purple)', height: '100%' }}>
+              <Typography.Text strong style={{ color: 'var(--ark-purple)' }}>
                 <Tag color="purple" style={{ marginRight: 6 }}>{t('guide.triggerModeScheduled')}</Tag>
               </Typography.Text>
               <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
@@ -218,8 +218,8 @@ export function UsageGuideSettingsPage() {
             </Card>
           </Col>
           <Col xs={24} md={8}>
-            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid #16a34a', height: '100%' }}>
-              <Typography.Text strong style={{ color: '#16a34a' }}>
+            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid var(--ark-green)', height: '100%' }}>
+              <Typography.Text strong style={{ color: 'var(--ark-green)' }}>
                 <Tag color="green" style={{ marginRight: 6 }}>{t('guide.triggerModeEvent')}</Tag>
               </Typography.Text>
               <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
@@ -228,8 +228,8 @@ export function UsageGuideSettingsPage() {
             </Card>
           </Col>
           <Col xs={24} md={8}>
-            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid #ea580c', height: '100%' }}>
-              <Typography.Text strong style={{ color: '#ea580c' }}>
+            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid var(--ark-orange)', height: '100%' }}>
+              <Typography.Text strong style={{ color: 'var(--ark-orange)' }}>
                 <Tag color="orange" style={{ marginRight: 6 }}>{t('guide.triggerModeManual')}</Tag>
               </Typography.Text>
               <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
@@ -290,7 +290,7 @@ export function UsageGuideSettingsPage() {
         </Typography.Paragraph>
         <Row gutter={[16, 16]}>
           <Col xs={24} md={8}>
-            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid #dc2626', height: '100%' }}>
+            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid var(--ark-red)', height: '100%' }}>
               <Space size={4} wrap>
                 <Typography.Text strong>{t('guidev2.legendRisk')}</Typography.Text>
                 <Tag color="green">{t('status.low')}</Tag>
@@ -303,7 +303,7 @@ export function UsageGuideSettingsPage() {
             </Card>
           </Col>
           <Col xs={24} md={8}>
-            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid #ea580c', height: '100%' }}>
+            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid var(--ark-orange)', height: '100%' }}>
               <Space size={4} wrap>
                 <Typography.Text strong>{t('guidev2.legendSeverity')}</Typography.Text>
                 <Tag color="default">{t('status.low')}</Tag>
@@ -316,7 +316,7 @@ export function UsageGuideSettingsPage() {
             </Card>
           </Col>
           <Col xs={24} md={8}>
-            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid #7c3aed', height: '100%' }}>
+            <Card size="small" style={{ background: 'var(--ark-panel-soft)', borderLeft: '3px solid var(--ark-purple)', height: '100%' }}>
               <Space size={4} wrap>
                 <Typography.Text strong>{t('guidev2.legendTrigger')}</Typography.Text>
                 <Tag color="purple">{t('guide.triggerModeScheduled')}</Tag>
@@ -338,15 +338,15 @@ export function UsageGuideSettingsPage() {
         style={{ marginBottom: 24 }}
       >
         <Typography.Paragraph style={{ marginBottom: 12 }}>
-          <Typography.Text strong><SafetyOutlined style={{ color: '#dc2626', marginRight: 4 }} />{t('guide.conceptRequired')}：</Typography.Text>
+          <Typography.Text strong><SafetyOutlined style={{ color: 'var(--ark-red)', marginRight: 4 }} />{t('guide.conceptRequired')}：</Typography.Text>
           {t('guide.conceptRequiredDesc')}
         </Typography.Paragraph>
         <Typography.Paragraph style={{ marginBottom: 12 }}>
-          <Typography.Text strong><RiseOutlined style={{ color: '#2563eb', marginRight: 4 }} />{t('guide.conceptDependency')}：</Typography.Text>
+          <Typography.Text strong><RiseOutlined style={{ color: 'var(--ark-blue)', marginRight: 4 }} />{t('guide.conceptDependency')}：</Typography.Text>
           {t('guide.conceptDependencyDesc')}
         </Typography.Paragraph>
         <Typography.Paragraph style={{ marginBottom: 12 }}>
-          <Typography.Text strong><SafetyOutlined style={{ color: '#16a34a', marginRight: 4 }} />{t('guide.conceptRiskControl')}：</Typography.Text>
+          <Typography.Text strong><SafetyOutlined style={{ color: 'var(--ark-green)', marginRight: 4 }} />{t('guide.conceptRiskControl')}：</Typography.Text>
           {t('guide.conceptRiskControlDesc')}
         </Typography.Paragraph>
         <Typography.Paragraph style={{ marginBottom: 12 }}>
@@ -354,11 +354,11 @@ export function UsageGuideSettingsPage() {
           {t('guide.conceptPricingDesc')} <Link to="/settings/billing">{t('guidev2.goBilling')} →</Link>
         </Typography.Paragraph>
         <Typography.Paragraph style={{ marginBottom: 12 }}>
-          <Typography.Text strong><CheckCircleOutlined style={{ color: '#ea580c', marginRight: 4 }} />{t('guide.conceptApproval')}：</Typography.Text>
+          <Typography.Text strong><CheckCircleOutlined style={{ color: 'var(--ark-orange)', marginRight: 4 }} />{t('guide.conceptApproval')}：</Typography.Text>
           {t('guide.conceptApprovalDesc')} <Link to="/inbox?type=approval">{t('guidev2.goApprovals')} →</Link>
         </Typography.Paragraph>
         <Typography.Paragraph style={{ marginBottom: 0 }}>
-          <Typography.Text strong><RobotOutlined style={{ color: '#7c3aed', marginRight: 4 }} />{t('guide.conceptLivePromo')}：</Typography.Text>
+          <Typography.Text strong><RobotOutlined style={{ color: 'var(--ark-purple)', marginRight: 4 }} />{t('guide.conceptLivePromo')}：</Typography.Text>
           {t('guide.conceptLivePromoDesc')}
         </Typography.Paragraph>
       </Card>

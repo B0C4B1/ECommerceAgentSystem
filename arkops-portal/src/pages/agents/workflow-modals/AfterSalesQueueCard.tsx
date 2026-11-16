@@ -103,10 +103,10 @@ export function AfterSalesQueueCard() {
 
   return (
     <Card
-      style={{ marginBottom: 16, borderTop: '3px solid #ea580c' }}
+      style={{ marginBottom: 16, borderTop: '3px solid var(--ark-orange)' }}
       title={
         <Space>
-          <ToolOutlined style={{ color: '#ea580c' }} />
+          <ToolOutlined style={{ color: 'var(--ark-orange)' }} />
           {t('aftersales.queueTitle')}
           <Badge status="processing" />
           <Tag color="orange" style={{ fontSize: 11 }}>{t('aftersales.lastProcess')}: {lastProcess}</Tag>
