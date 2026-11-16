@@ -211,6 +211,8 @@ export function AppShell() {
       message.warning(t('app.simulateMonthEndEmpty'));
       return;
     }
+    // P49：跨月后立刻跑一轮巡检，让「上期结论进待办」当场可见，而不是等人下次刷新才出现。
+    await orchestratorApi.runGovernanceSweep();
     await queryClient.invalidateQueries();
     message.success(t('app.simulateMonthEndDone'));
   };

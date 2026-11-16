@@ -2,7 +2,7 @@ import dayjs from 'dayjs';
 import type { Member } from '../../types/domain';
 
 // ===== 异常类型 =====
-export type ExceptionType = 'review_negative' | 'chat_escalation' | 'ad_low_roi' | 'logistics_stuck' | 'compliance_flag' | 'cycle_escalation' | 'cross_store_escalation' | 'goal_pace_escalation' | 'goal_settlement' | 'decision_request' | 'guard_health' | 'guard_health_account';
+export type ExceptionType = 'review_negative' | 'chat_escalation' | 'ad_low_roi' | 'logistics_stuck' | 'compliance_flag' | 'cycle_escalation' | 'cross_store_escalation' | 'goal_pace_escalation' | 'goal_settlement' | 'account_goal_settlement' | 'decision_request' | 'guard_health' | 'guard_health_account';
 
 /**
  * P30.1：Agent 主动请求决策。

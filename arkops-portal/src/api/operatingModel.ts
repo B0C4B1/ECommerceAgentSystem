@@ -617,6 +617,11 @@ export interface AccountAllocation {
 /** 分配目标超出月末预计多少才提示「接不住」，与节奏升级阈值保持一致。 */
 const ALLOCATION_HEADROOM_PCT = 10;
 
+/** P49：账户级结算待办没有门店策略，统一按 24 小时、超时沿用上期账户目标收尾。 */
+const ACCOUNT_SETTLEMENT_TIMEOUT_HOURS = 24;
+const ACCOUNT_SETTLEMENT_PREFIX = 'account-goal-settlement-';
+
+
 function buildAccountBasis(storeIds: AllMallId[]): AccountAllocationRow[] {
   return storeIds.map((storeId) => {
     const store = stores.find((s) => s.id === storeId);
@@ -1564,6 +1569,186 @@ export const operatingModelApi = {
   getAccountGoalReview: (storeIds: AllMallId[]) => mockDelay(buildAccountGoalReview(storeIds)),
 
   /**
+   * P49：账户上期的结论不能只停在账户目标行——人不点开工作台就永远不知道上期做成什么样，
+   * 也无法在收件箱里表态。只要账户目标还停在上期，Agent 就把「上期事实 + 沿用 / 下调」
+   * 推进待办；本月重新确认后，未处理的旧条目自动收口。
+   */
+  syncAccountGoalSettlementEscalation: async (
+    storeIds: AllMallId[],
+  ): Promise<{ escalated: boolean; closed: number }> => {
+    const review = accountGoal ? buildAccountGoalReview(storeIds) : null;
+    const openItems = (await exceptionsApi.list()).filter(
+      (item) => item.type === 'account_goal_settlement' && !item.resolved && !item.ignored,
+    );
+    const closeItems = async (items: typeof openItems, note: string) => {
+      for (const item of items) await exceptionsApi.resolve(item.id, note, 'Orchestrator');
+      return items.length;
+    };
+
+    if (!review || !accountGoal) {
+      return mockDelay({
+        escalated: false,
+        closed: await closeItems(openItems, '账户目标已在本月重新确认，上期结算待办随之关闭'),
+      });
+    }
+
+    const goalMonth = dayjs(accountGoal.updatedAt).format('YYYY-MM');
+    const id = `${ACCOUNT_SETTLEMENT_PREFIX}${goalMonth}-${review.periodKey}`;
+    // 更早周期的遗留条目先收口：同一个月只留一条当前待办，避免历史提醒越堆越多。
+    const closed = await closeItems(
+      openItems.filter((item) => item.id !== id),
+      '账户目标已有更新的上期结算待办，这条旧提醒自动关闭',
+    );
+
+    const pctText = `${Math.round(review.achievedPct * 100)}%`;
+    const loweredTarget = roundTo(review.actualGmv, 1000);
+    const canLower = loweredTarget > 0 && loweredTarget < review.target;
+    const gapText = review.shortfall > 0 ? `，缺口 ${formatCny(review.shortfall)}` : '';
+    const achieved = review.verdict === 'achieved';
+    const escalated = await exceptionsApi.upsertEscalation({
+      id,
+      type: 'account_goal_settlement',
+      // 账户级条目没有归属店铺：不塞 storeId，避免被当成某家店的升级或套用单店超时策略。
+      storeName: '账户（全部店铺）',
+      agentType: 'orchestrator',
+      level: achieved ? 'info' : review.achievedPct < 0.8 ? 'critical' : 'warning',
+      title: `账户上期${achieved ? '已达成' : '未达成'} · ${pctText}`,
+      summary: `上期（${review.periodKey}）账户目标 ${formatCny(review.target)} · 各店实际合计 ${formatCny(
+        review.actualGmv,
+      )}（${pctText}）${gapText}；账户目标仍停在上期，本月承诺还需你确认一次。`,
+      detail: `实际只汇总 ${review.coveredStores}/${review.storeCount} 家有经营基线的店铺；沿用不改数字，下调按上期实际取整到千元。两者都只改账户目标，不重写各店目标，也不动护栏。`,
+      suggestedAction: canLower
+        ? '在收件箱选择「沿用上期目标」或「按上期实际下调」；不处理时超时按沿用收尾。'
+        : '在收件箱确认沿用上期目标；不处理时超时按沿用收尾。',
+      decision: {
+        question: achieved
+          ? `上期账户达成 ${pctText}：本月继续沿用 ${formatCny(review.target)} 吗？`
+          : `上期账户只完成 ${pctText}：本月继续沿用 ${formatCny(review.target)}${
+              canLower ? `，还是按上期实际下调到 ${formatCny(loweredTarget)}` : ''
+            }？`,
+        options: [
+          {
+            id: 'uphold',
+            label: '沿用上期目标',
+            consequence: `本月账户目标仍为 ${formatCny(review.target)} 并记为已确认；${
+              review.shortfall > 0 ? `上期缺口 ${formatCny(review.shortfall)} 记为你已接受，` : ''
+            }各店目标与护栏不动。`,
+            recommended: true,
+          },
+          ...(canLower
+            ? [
+                {
+                  id: 'override' as const,
+                  label: `下调至 ${formatCny(loweredTarget)}`,
+                  consequence: `账户目标 ${formatCny(review.target)} → ${formatCny(
+                    loweredTarget,
+                  )}（上期实际取整到千元）；各店目标与护栏不动，之后仍可在账户目标行改回。`,
+                },
+              ]
+            : []),
+        ],
+        timeoutHours: ACCOUNT_SETTLEMENT_TIMEOUT_HOURS,
+        deadline: dayjs().add(ACCOUNT_SETTLEMENT_TIMEOUT_HOURS, 'hour').toISOString(),
+        timeoutOptionId: 'uphold',
+      },
+      // 缺口本身就是可核对的金额影响；达成时不给金额，避免把 0 当成风险排到前面。
+      impact:
+        review.shortfall > 0
+          ? {
+              amount: Math.round(review.shortfall),
+              kind: 'goal_gap' as const,
+              basis: `上期账户目标未达成金额（达成 ${pctText}）`,
+            }
+          : undefined,
+      createdAt: new Date().toISOString(),
+      resolved: false,
+      ignored: false,
+      linkTo: '/dashboard#portfolio-goals-card',
+    });
+
+    return mockDelay({ escalated, closed });
+  },
+
+  /**
+   * P49：把收件箱里的账户级立场落回账户目标。
+   * - 沿用：数字不变，记为「本月已确认」，上期缺口记为人已接受；
+   * - 下调：按上期实际（取整到千元）改写账户目标；
+   * 两者都不重写各店目标、不动护栏；账户级没有门店策略，超时由巡检按沿用手收尾。
+   */
+  applyAccountGoalSettlementRemedy: async (
+    optionId: 'uphold' | 'override',
+    meta: { actor: string; exceptionId: string; note?: string },
+  ) => {
+    const storeIds = stores.filter((store) => store.status === 'connected').map((store) => store.id);
+    const review = accountGoal ? buildAccountGoalReview(storeIds) : null;
+    const actor = meta.actor.trim() || '当前用户';
+    const note = meta.note?.trim();
+    const linkTo = '/dashboard#portfolio-goals-card';
+
+    if (!accountGoal || !review) {
+      await exceptionsApi.resolve(
+        meta.exceptionId,
+        '账户目标已在本月重新确认，本条不再需要处理',
+        actor,
+      );
+      return mockDelay({ applied: false, target: accountGoal?.target ?? 0 });
+    }
+
+    const pctText = `${Math.round(review.achievedPct * 100)}%`;
+    const loweredTarget = roundTo(review.actualGmv, 1000);
+    const canLower = loweredTarget > 0 && loweredTarget < accountGoal.target;
+
+    if (optionId === 'override' && canLower) {
+      const before = accountGoal.target;
+      accountGoal = {
+        ...accountGoal,
+        target: loweredTarget,
+        periodLabel: '本月',
+        updatedAt: new Date().toISOString(),
+      };
+      recordAuditLog({
+        actor,
+        action: '账户目标补救 · 按上期实际下调',
+        entity: 'account',
+        entityId: 'account',
+        summary: `账户目标 ${formatCny(before)} → ${formatCny(loweredTarget)}；依据：上期（${
+          review.periodKey
+        }）目标 ${formatCny(review.target)}、实际 ${formatCny(review.actualGmv)}（达成 ${pctText}）；各店目标与护栏未改动${
+          note ? `；${note}` : ''
+        }`,
+        category: 'human_ops',
+        linkTo,
+      });
+      await exceptionsApi.resolve(
+        meta.exceptionId,
+        `人选择「按上期实际下调」：账户目标 ${formatCny(before)} → ${formatCny(
+          loweredTarget,
+        )}，各店目标与护栏未改动`,
+        actor,
+      );
+      return mockDelay({ applied: true, target: loweredTarget });
+    }
+
+    const upholdNote = `账户目标仍为 ${formatCny(review.target)}，记为本月已确认${
+      review.shortfall > 0 ? `；上期缺口 ${formatCny(review.shortfall)} 记为已接受` : ''
+    }${note ? `；${note}` : ''}`;
+    accountGoal = { ...accountGoal, periodLabel: '本月', updatedAt: new Date().toISOString() };
+    recordAuditLog({
+      actor,
+      action: '账户目标补救 · 沿用上期目标',
+      entity: 'account',
+      entityId: 'account',
+      summary: `账户目标沿用 ${formatCny(review.target)}，记为本月已确认${
+        review.shortfall > 0 ? `；上期缺口 ${formatCny(review.shortfall)} 记为已接受` : ''
+      }；各店目标与护栏未改动${note ? `；${note}` : ''}`,
+      category: 'human_ops',
+      linkTo,
+    });
+    await exceptionsApi.resolve(meta.exceptionId, upholdNote, actor);
+    return mockDelay({ applied: false, target: accountGoal.target });
+  },
+
+  /**
    * 演示：把账户目标退回上一个自然月，复现「上期 · 待确认」。
    * 从未确认过账户目标时，用与 suggestAccountTarget 相同的基线口径补一条上期目标，
    * 保证刷新/重置后仍能走到这个状态；不写审计，因为它不是 Agent 或人的经营动作。
@@ -1618,7 +1803,7 @@ export const operatingModelApi = {
    * P29.3 人确认后写回：一次确认改 N 家店的目标，而不是逐店改 N 次。
    * 每家店的目标变更都留一条审计（旧值→新值 + 占比 + 依据），账户目标另留一条汇总。
    */
-  adoptAccountAllocation: (
+  adoptAccountAllocation: async (
     allocation: AccountAllocation,
     meta: { actor: string; actorRole?: string },
   ) => {
@@ -1683,6 +1868,15 @@ export const operatingModelApi = {
       category: 'human_ops',
       linkTo: '/dashboard',
     });
+
+    // P49：人在账户目标行重新确认后，收件箱里的上期结算待办不再需要处理，
+    // 否则会出现「目标已确认、待办还在等人表态」的矛盾状态。
+    const openSettlements = (await exceptionsApi.list()).filter(
+      (item) => item.type === 'account_goal_settlement' && !item.resolved && !item.ignored,
+    );
+    for (const item of openSettlements) {
+      await exceptionsApi.resolve(item.id, '账户目标已由人重新确认，上期结算待办随之关闭', actor);
+    }
 
     return mockDelay({ accountGoal, goals: updated });
   },

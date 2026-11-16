@@ -739,6 +739,8 @@ export interface GovernanceSweepResult {
   guardRestored: number;
   /** P47：到期时发现人已改过、仅清掉过期标记的条数。 */
   guardExpiryCleared: number;
+  /** P49：账户上期结算待办有新建或自动收口（0/1）。 */
+  accountChanged: number;
   /** 是否有任何变化（false 时不打扰人）。 */
   changed: boolean;
 }
@@ -2356,6 +2358,20 @@ export const orchestratorApi = {
     );
     let applied = 0;
     for (const item of expired) {
+      // P49：账户级条目没有归属店铺，套不到门店超时策略；按同样的 24 小时默认只收口提醒，
+      // 不替人确认本月承诺——账户目标行仍显示「上期 · 待确认」，随时可由人改数或确认。
+      if (item.type === 'account_goal_settlement') {
+        const decision = item.decision!;
+        const defaultOption = decision.options.find((option) => option.id === decision.timeoutOptionId);
+        const note = `超过 ${decision.timeoutHours} 小时未决策，按默认建议「${defaultOption?.label ?? '沿用上期目标'}」收尾`;
+        await exceptionsApi.resolve(
+          item.id,
+          `${note}（账户目标维持上期原值，本月仍未确认；可随时在账户目标行确认或改数）`,
+          AGENT_TIMEOUT_ACTOR,
+        );
+        applied += 1;
+        continue;
+      }
       const ref = item.conflictRef;
       const policyStoreId = ref?.storeId ?? item.storeId;
       if (policyStoreId === undefined) continue;
@@ -3029,11 +3045,22 @@ export const orchestratorApi = {
     // P38.1：护栏升级按账户口径一次同步，同一条护栏的多店提醒在这里合并。
     const guard = await syncGuardEscalationsAcross(ids);
     guardChanged = guard.changedStores;
+    // P49：账户上期结论不再只挂在账户目标行；巡检把「上期事实 + 沿用 / 下调」推进待办，
+    // 本月已重新确认时自动收口，人不进工作台也能在收件箱看到该表态的事。
+    const account = await operatingModelApi.syncAccountGoalSettlementEscalation(ids);
+    const accountChanged = account.escalated || account.closed > 0 ? 1 : 0;
     // 全局收尾：人的决策规则优先，其次超时默认；两者都只处理已到期/已可判定的条目。
     const ruleApplied = await orchestratorApi.applyDecisionRules();
     const expiredApplied = await orchestratorApi.applyExpiredDecisionDefaults();
     const changed =
-      settled + paceChanged + guardChanged + ruleApplied + expiredApplied + guardRestored + guardExpiryCleared >
+      settled +
+        paceChanged +
+        guardChanged +
+        accountChanged +
+        ruleApplied +
+        expiredApplied +
+        guardRestored +
+        guardExpiryCleared >
       0;
     return {
       storeCount: ids.length,
@@ -3044,6 +3071,7 @@ export const orchestratorApi = {
       expiredApplied,
       guardRestored,
       guardExpiryCleared,
+      accountChanged,
       changed,
     };
   },

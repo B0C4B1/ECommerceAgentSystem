@@ -317,6 +317,10 @@ export function routeEscalation(item: ExceptionItem): EscalationRoute {
   } else if (amount !== undefined && amount >= ROUTE_OWNER_AMOUNT_THRESHOLD) {
     role = 'Owner';
     reason = `可核对影响 ¥${amount.toLocaleString()} 超过 ¥${ROUTE_OWNER_AMOUNT_THRESHOLD.toLocaleString()} 运营处理上限`;
+  } else if (item.type === 'account_goal_settlement') {
+    // P49：账户承诺的沿用 / 下调属于「设目标」，落到 Owner，不交给运营负责人。
+    role = 'Owner';
+    reason = '账户承诺是否沿用上期数值或下调，只有设目标的人能定';
   } else if (item.level === 'critical') {
     role = 'Owner';
     reason = '关键级别问题，需要 Owner 知情后再处理';

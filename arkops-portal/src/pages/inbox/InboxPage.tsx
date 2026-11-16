@@ -556,6 +556,24 @@ export function InboxPage() {
     },
     onError: () => message.error(t('inbox.decisionFailed')),
   });
+  // P49：账户上期的结论直接落回账户目标——沿用不动数字、只记本月已确认；下调按上期实际改写。
+  // 两者都不重写各店目标，也不动护栏。
+  const accountSettlementMutation = useMutation({
+    mutationFn: ({ exception, option }: { exception: ExceptionItem; option: EscalationDecisionOption }) =>
+      operatingModelApi.applyAccountGoalSettlementRemedy(
+        option.id === 'override' ? 'override' : 'uphold',
+        { actor: user?.name ?? '当前用户', exceptionId: exception.id },
+      ),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
+      queryClient.invalidateQueries({ queryKey: ['outcomes'] });
+      itemToast(result.applied ? t('inbox.accountSettlementLowered') : t('inbox.accountSettlementKept'));
+    },
+    onError: () => message.error(t('inbox.decisionFailed')),
+  });
   // P36.1：护栏体检升级的结论直接落回护栏——确认维持只留痕，调至建议值才改护栏。
   const guardRemedyMutation = useMutation({
     mutationFn: async ({
@@ -1339,13 +1357,16 @@ export function InboxPage() {
         // 目标节奏升级 / 上期结算 / 护栏体检都没有周期冲突可裁决，选项直接写回目标或护栏（P33.1、P34.1、P36.1）。
         const isGoalPace = exception.type === 'goal_pace_escalation';
         const isGoalSettlement = exception.type === 'goal_settlement';
+        const isAccountSettlement = exception.type === 'account_goal_settlement';
         const isGuardHealth =
           exception.type === 'guard_health' || exception.type === 'guard_health_account';
         const remedyPending = isGoalSettlement
           ? settlementRemedyMutation.isPending
-          : isGoalPace
-            ? goalRemedyMutation.isPending
-            : guardRemedyMutation.isPending;
+          : isAccountSettlement
+            ? accountSettlementMutation.isPending
+            : isGoalPace
+              ? goalRemedyMutation.isPending
+              : guardRemedyMutation.isPending;
         return (
           <Space size={4} wrap style={{ justifyContent: 'flex-end' }}>
             {decision.options.map((option) => {
@@ -1370,6 +1391,7 @@ export function InboxPage() {
                   onConfirm={() => {
                     if (isGoalPace) goalRemedyMutation.mutate({ exception, option });
                     else if (isGoalSettlement) settlementRemedyMutation.mutate({ exception, option });
+                    else if (isAccountSettlement) accountSettlementMutation.mutate({ exception, option });
                     else if (isGuardHealth) guardRemedyMutation.mutate({ exception, option });
                     else decideEscalationMutation.mutate({ exception, option });
                   }}
@@ -1380,7 +1402,7 @@ export function InboxPage() {
                     title={option.consequence}
                     disabled={!canDecide}
                     loading={
-                      isGoalPace || isGoalSettlement || isGuardHealth
+                      isGoalPace || isGoalSettlement || isAccountSettlement || isGuardHealth
                         ? remedyPending
                         : decideEscalationMutation.isPending
                     }
@@ -1987,6 +2009,11 @@ export function InboxPage() {
                           {entry.exception?.type === 'goal_pace_escalation' && (
                             <Tag color="magenta" style={{ margin: 0 }}>
                               {t('exc.type_goal_pace_escalation')}
+                            </Tag>
+                          )}
+                          {entry.exception?.type === 'account_goal_settlement' && (
+                            <Tag color="cyan" style={{ margin: 0 }}>
+                              {t('exc.type_account_goal_settlement')}
                             </Tag>
                           )}
                           {entry.exception?.type === 'decision_request' && (

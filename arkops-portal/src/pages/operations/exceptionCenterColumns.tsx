@@ -44,6 +44,7 @@ function typeIcon(type: ExceptionType) {
     cross_store_escalation: <SwapOutlined />,
     goal_pace_escalation: <RiseOutlined />,
     goal_settlement: <AlertOutlined />,
+    account_goal_settlement: <CheckCircleOutlined />,
     decision_request: <QuestionCircleOutlined />,
     guard_health: <SafetyOutlined />,
     guard_health_account: <SafetyOutlined />,
