@@ -17,6 +17,7 @@ import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
 import { usePermission } from '../../app/usePermission';
 import type { GoalMetric, GoalPriority, StoreGoal } from '../../types/domain';
+import { invalidateOperatingModelQueries } from '../../utils/operatingModelQueries';
 
 interface StoreGoalCardProps {
   /** 未指定时取当前店铺作用域；都为空则不渲染 */
@@ -194,18 +195,13 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
     },
     onSuccess: (saved) => {
       queryClient.setQueryData(['storeGoal', saved.storeId], saved);
-      queryClient.invalidateQueries({ queryKey: ['guardChanges', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['guardHealth', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['goalPace', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+      // P50：单店目标/护栏一改，同页账户级推导（建议、预算池、账户护栏）全部依赖它，统一失效。
+      invalidateOperatingModelQueries(queryClient);
       setEditing(null);
       setReason('');
       setExpiryDays(0);
-      // 目标/护栏是仲裁输入：改完后立即让 Agent 按新约束重跑一轮，而不是等人再点“重新生成”。
-      queryClient.invalidateQueries({ queryKey: ['operatingCycle', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-      queryClient.invalidateQueries({ queryKey: ['crossStoreArbitration'] });
       message.success(t('goal.saved'));
+      // 目标/护栏是仲裁输入：改完后立即让 Agent 按新约束重跑一轮，而不是等人再点“重新生成”。
       orchestratorApi
         .generateCycle(saved.storeId)
         .then((cycle) => {
@@ -238,12 +234,7 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
     },
     onSuccess: (saved) => {
       queryClient.setQueryData(['storeGoal', saved.storeId], saved);
-      queryClient.invalidateQueries({ queryKey: ['guardChanges', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['guardHealth', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['goalPace', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
-      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      invalidateOperatingModelQueries(queryClient);
       message.success(t('goal.guardReverted'));
       orchestratorApi
         .generateCycle(saved.storeId)
@@ -285,13 +276,7 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
     },
     onSuccess: (saved) => {
       queryClient.setQueryData(['storeGoal', saved.storeId], saved);
-      queryClient.invalidateQueries({ queryKey: ['guardChanges', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['guardHealth', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['goalPace', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
-      queryClient.invalidateQueries({ queryKey: ['operatingCycle', saved.storeId] });
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-      queryClient.invalidateQueries({ queryKey: ['crossStoreArbitration'] });
+      invalidateOperatingModelQueries(queryClient);
       setProposalOpen(false);
       setProposal(null);
       message.success(t('goal.proposal.adopted'));

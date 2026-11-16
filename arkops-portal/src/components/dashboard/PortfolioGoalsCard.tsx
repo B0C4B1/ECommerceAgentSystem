@@ -43,6 +43,7 @@ import { useI18n } from '../../app/i18n';
 import { usePermission } from '../../app/usePermission';
 import { useStoreScope } from '../../app/storeScope';
 import type { AllMallId, StoreGoal } from '../../types/domain';
+import { invalidateOperatingModelQueries } from '../../utils/operatingModelQueries';
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat('zh-CN', {
@@ -114,13 +115,8 @@ function AccountGoalSection({
     onError: (error) => message.error((error as Error).message),
     onSuccess: (result) => {
       result.goals.forEach((goal) => queryClient.setQueryData(['storeGoal', goal.storeId], goal));
-      queryClient.invalidateQueries({ queryKey: ['accountGoal'] });
-      queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
-      queryClient.invalidateQueries({ queryKey: ['guardChanges'] });
-      queryClient.invalidateQueries({ queryKey: ['goalPace'] });
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-      queryClient.invalidateQueries({ queryKey: ['budgetPool'] });
-      queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+      // P50：账户目标会重写各店目标，账户侧与单店侧一起失效，别留旧预算/旧护栏。
+      invalidateOperatingModelQueries(queryClient);
       setOpen(false);
       message.success(t('accountGoal.saved', { count: String(result.goals.length) }));
     },
@@ -387,16 +383,8 @@ function BudgetPoolSection({ storeIds }: { storeIds: AllMallId[] }) {
       }),
     onError: (error) => message.error((error as Error).message),
     onSuccess: () => {
-      [
-        'storeGoal',
-        'portfolio',
-        'guardHealth',
-        'accountGuards',
-        'crossStoreArbitration',
-        'audit-logs',
-        'budgetPool',
-        'budgetRevert',
-      ].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
+      // P50：预算池写回的是各店护栏，账户护栏与账户建议都跟着变。
+      invalidateOperatingModelQueries(queryClient);
       message.success(t('budgetPool.reverted'));
     },
   });
@@ -409,16 +397,8 @@ function BudgetPoolSection({ storeIds }: { storeIds: AllMallId[] }) {
       }),
     onError: (error) => message.error((error as Error).message),
     onSuccess: (result) => {
-      [
-        'storeGoal',
-        'portfolio',
-        'guardHealth',
-        'accountGuards',
-        'crossStoreArbitration',
-        'audit-logs',
-        'budgetPool',
-        'budgetRevert',
-      ].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
+      // P50：预算池写回的是各店护栏，账户护栏与账户建议都跟着变。
+      invalidateOperatingModelQueries(queryClient);
       setOpen(false);
       message.success(t('budgetPool.saved', { count: String(result.moves.length) }));
     },
@@ -697,14 +677,8 @@ function AccountGuardSection({ storeIds }: { storeIds: AllMallId[] }) {
       }),
     onError: (error) => message.error((error as Error).message),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
-      queryClient.invalidateQueries({ queryKey: ['guardHealth'] });
-      queryClient.invalidateQueries({ queryKey: ['guardChanges'] });
-      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-      queryClient.invalidateQueries({ queryKey: ['accountGuards'] });
-      queryClient.invalidateQueries({ queryKey: ['goalPace'] });
-      queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+      // P50：账户护栏写回各店护栏，预算池所需广告与单店卡都要同页重算。
+      invalidateOperatingModelQueries(queryClient);
       setOpen(false);
       setReason('');
       message.success(

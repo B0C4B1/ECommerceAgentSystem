@@ -19,7 +19,7 @@ V1.0 ──── V1.1 ──── V1.2 ──── V1.3 ──── V1.4
 | V1.2 | 🔄 部分交付 | 报表中心与导出已上线；可配置 Dashboard（Widget 拖拽、多视图）未开始 |
 | V1.3 | 🔄 部分交付 | 直播运营面板已上线；素材中心、内容排期未开始 |
 | V1.4 | ⏳ 未开始 | 协作、API/Webhook、自定义工作流、引导升级 |
-| V1.5 | 🔄 部分交付 | P28–P47 已收口，下一轮继续自主推演 |
+| V1.5 | 🔄 部分交付 | P28–P50 已收口，下一轮继续自主推演 |
 
 > V1.5 是横切治理层，不依赖 V1.4，可与 V1.2–V1.4 并行推进。
 
@@ -626,9 +626,37 @@ V1.0 ──── V1.1 ──── V1.2 ──── V1.3 ──── V1.4
 
 **边界**：只补账户级「结算结论 → 待办 → 落回账户目标」这一条链路；不改单店结算、分配算法、预算池与护栏；不新增数据源、路由、页面、后端或依赖；账户级不套用门店超时策略，固定 24 小时且超时不改任何目标。
 
-**下一轮候选**：P48.2 店级目标变更后预算池同页失效（`StoreGoalCard` 改目标/采纳建议后预算池查询仍显示旧值）；护栏临时放宽的提前结束入口（走查未见明确需要，继续挂起）。
+**下一轮候选**：P48.2 店级目标变更后预算池同页失效（已并入 P50 统一收口）；护栏临时放宽的提前结束入口（走查未见明确需要，继续挂起）。
 
 **强化的人职责**：处理升级——人不再需要「想起去看账户目标有没有跨月、自己加总上期实际、再回来改数」，Agent 把上期结论与两个可执行立场直接放进收件箱，并负责到期收口与旧条目清理；决定本身仍是人的：沿用不改数字、下调只改账户目标。判断错了，人可在收件箱二次确认气泡里看到影响与后果、在账户目标行随时改回，审计与处理记录都留痕；Agent 超时不会替人确认承诺。
+
+---
+
+## P50 — 单店改动后，账户级推导必须同页重算（设目标）
+
+**要解决的问题**：工作台把单店目标/护栏与账户级推导（账户目标建议、预算池、账户护栏）摆在同一页，但每张卡各自手写一份刷新清单，谁都没写全。人改完一家店的目标，单店卡立刻变，账户侧的钱却停在旧值——人要么怀疑改动没生效，要么直接按旧预算去发资源。这是「目标 ↔ 资源」在页面内的断点，也是 P48.2 登记的同一个问题。
+
+**走查证据**（改前）：
+- `src/components/dashboard/StoreGoalCard.tsx#L195-L208`：保存目标/护栏后刷新 `storeGoal/guardChanges/guardHealth/goalPace/audit-logs/operatingCycle/portfolio/crossStoreArbitration`，漏 `budgetPool/budgetRevert/accountGoalSuggestion/accountGoalReview/accountGuards/accountGuardPreview/dashboard`。
+- `src/components/dashboard/StoreGoalCard.tsx#L239-L247`（撤销护栏变更）、`#L286-L294`（采纳目标建议）同样漏预算池、账户护栏与账户建议。
+- `src/components/dashboard/PortfolioGoalsCard.tsx#L115-L126`（确认账户目标）漏 `accountGuards/accountGuardPreview/accountGoalSuggestion/accountGoalReview/crossStoreArbitration`。
+- `src/components/dashboard/PortfolioGoalsCard.tsx#L699-L707`（账户护栏下发）漏 `budgetPool/budgetRevert/accountGoalSuggestion/accountGoalReview/crossStoreArbitration/dashboard`。
+- `src/pages/dashboard/DashboardPage.tsx#L201-L209`（治理巡检有变更时）漏 `budgetPool/budgetRevert/accountGuards/accountGuardPreview/accountGoalSuggestion/accountGoalReview/crossStoreArbitration`。
+- `src/app/providers.tsx#L11-L18`：`refetchOnWindowFocus: false` + `staleTime: 20s`，不失效就整段会话停在旧值，页面不会自愈。
+- 走查现象：把 A 店目标从基线值一次性调高一大截并保存，单店卡显示新目标，但「广告预算池」仍是改前的「没有可挪动的富余 / 无需调整」，账户护栏卡也仍是旧值。
+
+**状态**：🟢 P50.1 已完成
+
+关键改动：
+
+- [x] **统一失效清单（P50.1）**：新增 `src/utils/operatingModelQueries.ts#invalidateOperatingModelQueries`，把依赖目标/护栏的全部查询前缀收在一处（单店目标、周期、节奏、护栏体检/变更/影响、组合视图、预算池、上次再分配、账户目标、账户建议、上期复盘、账户分配、账户护栏、护栏预览、跨店裁决、工作台汇总、待办、审批、审计、经营周期）；单店卡保存/采纳/撤销、账户目标确认、账户护栏下发、预算池执行/撤销、工作台治理巡检统一调用，不再各自手写。
+  验收：多店工作台把一家店目标调高后，同页「广告预算池」无需刷新即按新目标重算（出现/改变挪移或缺口口径）；再改该店月预算上限，账户护栏卡与预算池卡显示的护栏值一致；在预算池弹窗执行/撤销、账户护栏下发后，单店卡与跨店裁决也同页更新；治理巡检有变更时账户侧同步刷新。
+
+**边界**：只统一「改动后让哪些查询失效」，不改任何 API 口径、推导算法或写入逻辑；不新增数据源、路由、页面、后端或依赖；账户级区块仍只在多店铺时出现；失效是前缀匹配，刷新范围略大于单次改动所需，属于可接受的保守做法（Mock 数据，无多余网络成本）。
+
+**下一轮候选**：护栏临时放宽的提前结束入口（走查未见明确需要，继续挂起）；单店卡自动重跑失败时目前只有静默兜底，可考虑显式提示「Agent 未按新目标重跑，可手动补跑」。
+
+**强化的人职责**：设目标——人只改一次数字，Agent 负责把账户侧所有推导同步重算，人不必刷新页面核对、也不必凭旧预算签发资源。判断错了，人仍能在预算池弹窗逐店看到月末预计/所需/调整前后，选择不执行或撤销上次再分配；在账户护栏卡看到实际下发结果与跳过原因。
 
 ---
 

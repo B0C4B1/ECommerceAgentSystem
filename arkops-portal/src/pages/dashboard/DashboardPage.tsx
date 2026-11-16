@@ -37,6 +37,7 @@ import { OperatingCycleCard } from '../../components/dashboard/OperatingCycleCar
 import { PortfolioGoalsCard } from '../../components/dashboard/PortfolioGoalsCard';
 import { AgentReviewCard } from '../../components/dashboard/AgentReviewCard';
 import { RoleFocusCard } from '../../components/dashboard/RoleFocusCard';
+import { invalidateOperatingModelQueries } from '../../utils/operatingModelQueries';
 
 /** Assumed net margin used only for the profit *estimate* KPI; surfaced in the UI (C4). */
 const ESTIMATED_NET_MARGIN = 0.21;
@@ -199,14 +200,8 @@ export function DashboardPage() {
           // 一轮巡检无论是否生成新周期都刷新心跳，「上次/下次巡检」才对得上真实时间。
           queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] });
           if (sweep?.changed) {
-            queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
-            queryClient.invalidateQueries({ queryKey: ['goalPeriod'] });
-            queryClient.invalidateQueries({ queryKey: ['goalPace'] });
-            queryClient.invalidateQueries({ queryKey: ['guardHealth'] });
-            queryClient.invalidateQueries({ queryKey: ['guardChanges'] });
-            queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-            queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-            queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+            // P50：巡检改了目标/护栏后，账户级推导与单店卡必须同页重算，清单统一维护。
+            invalidateOperatingModelQueries(queryClient);
           }
           if (!fired.length) return;
           queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
