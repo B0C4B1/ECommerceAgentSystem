@@ -175,8 +175,10 @@ function AccountGoalSection({
               setOpen(true);
             }}
           >
-            {!isCurrent && suggestion
-              ? t('accountGoal.confirmSuggested', { value: formatMoney(suggestion.target) })
+            {!accountGoal
+              ? suggestion
+                ? t('accountGoal.confirmSuggested', { value: formatMoney(suggestion.target) })
+                : t('accountGoal.open')
               : isCurrent
                 ? t('accountGoal.open')
                 : t('accountGoal.reopen')}

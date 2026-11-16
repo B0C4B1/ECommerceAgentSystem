@@ -12,7 +12,7 @@ import { getAuditLogs, recordAuditLog } from './auditLogger';
 import { getStoreOperatingBaseline } from './businessDashboard';
 import { exceptionsApi } from './exceptions';
 import { stores } from './mockData';
-import { registerMockState } from './mockPersistence';
+import { registerMockState, saveMockPersistence } from './mockPersistence';
 import { getScenarioAutonomy, getScenarioForAgent } from './scenarioData';
 import type {
   AccountGoal,
@@ -1094,6 +1094,33 @@ export const operatingModelApi = {
 
   /** P29.3 账户级目标（可能尚未设定）。 */
   getAccountGoal: () => mockDelay(accountGoal ? { ...accountGoal } : null),
+
+  /**
+   * 演示：把账户目标退回上一个自然月，复现「上期 · 待确认」。
+   * 从未确认过账户目标时，用与 suggestAccountTarget 相同的基线口径补一条上期目标，
+   * 保证刷新/重置后仍能走到这个状态；不写审计，因为它不是 Agent 或人的经营动作。
+   */
+  carryOverAccountGoalForDemo: () => {
+    if (accountGoal) {
+      accountGoal = { ...accountGoal, updatedAt: dayjs().subtract(1, 'month').toISOString() };
+    } else {
+      const projections = stores
+        .map((store) => getStoreOperatingBaseline(store.name)?.projectedMonthGmv)
+        .filter((value): value is number => typeof value === 'number');
+      if (projections.length === 0) return mockDelay<AccountGoal | null>(null);
+      accountGoal = {
+        metric: 'gmv',
+        target: roundTo(
+          projections.reduce((sum, value) => sum + value, 0),
+          1000,
+        ),
+        periodLabel: '本月',
+        updatedAt: dayjs().subtract(1, 'month').toISOString(),
+      };
+    }
+    saveMockPersistence();
+    return mockDelay<AccountGoal>({ ...accountGoal });
+  },
 
   /**
    * P29.3 Agent 建议账户目标：各店按当前节奏的月末预计之和，人可改可不改。

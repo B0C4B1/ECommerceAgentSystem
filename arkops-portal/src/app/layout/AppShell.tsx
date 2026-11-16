@@ -44,8 +44,9 @@ import {
   ThunderboltOutlined,
   QuestionCircleOutlined,
   ReloadOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
-import { Avatar, Badge, Button, Divider, Drawer, Dropdown, Layout, Menu, Popconfirm, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd';
+import { Avatar, Badge, Button, Divider, Drawer, Dropdown, Layout, Menu, Popconfirm, Segmented, Select, Space, Tag, Tooltip, Typography, message } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useDemoMode } from '../demoMode';
 import { LANGUAGE_SWITCHER_ENABLED, useI18n } from '../i18n';
@@ -55,6 +56,7 @@ import { useTheme } from '../theme';
 import { dashboardApi } from '../../api/dashboard';
 import { exceptionsApi } from '../../api/exceptions';
 import { orchestratorApi } from '../../api/orchestrator';
+import { operatingModelApi } from '../../api/operatingModel';
 import { resetMockPersistence } from '../../api/mockPersistence';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth';
@@ -201,6 +203,17 @@ export function AppShell() {
 
   const hasBusinessData = user?.experience !== 'onboarding';
   const queryClient = useQueryClient();
+
+  /** P44.2 演示路径：把账户目标退到上期，复现「上期 · 待确认」。 */
+  const simulateAccountGoalCarryOver = async () => {
+    const next = await operatingModelApi.carryOverAccountGoalForDemo();
+    if (!next) {
+      message.warning(t('app.simulateMonthEndEmpty'));
+      return;
+    }
+    await queryClient.invalidateQueries();
+    message.success(t('app.simulateMonthEndDone'));
+  };
 
   /**
    * P35.1 进入应用即触发一轮治理自巡检：目标结算、节奏/护栏升级、决策规则与超时默认
@@ -628,6 +641,14 @@ export function AppShell() {
                 <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>{t('shell.demoScenarioTag')}</Tag>
               </Space>
               <Space size={4}>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<HistoryOutlined />}
+                  onClick={simulateAccountGoalCarryOver}
+                >
+                  {t('app.simulateMonthEnd')}
+                </Button>
                 <Popconfirm
                   title={t('app.resetMockTitle')}
                   description={t('app.resetMockDesc')}

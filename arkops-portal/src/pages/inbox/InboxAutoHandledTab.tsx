@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router-dom';
 import { useI18n } from '../../app/i18n';
 import { auditLogsApi } from '../../api/auditLogs';
 import { exceptionsApi } from '../../api/exceptions';
+import { storesApi } from '../../api/stores';
 import { DataTableCard } from '../../components/table/DataTableCard';
 import type { AuditLog } from '../../types/domain';
 import type { ExceptionItem } from '../operations/exceptionCenterMockData';
@@ -96,6 +97,23 @@ export function InboxAutoHandledTab({
   const navigate = useNavigate();
   const { data: auditLogs = [] } = useQuery({ queryKey: ['audit-logs'], queryFn: auditLogsApi.list });
   const { data: exceptions = [] } = useQuery({ queryKey: ['exceptions'], queryFn: exceptionsApi.list });
+  const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: () => storesApi.list() });
+
+  /** P44.2：审计里的实体是存储口径（store/account），回执要像人话：类型 + 店名。 */
+  const storeNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    stores.forEach((store) => map.set(String(store.id), store.name));
+    return map;
+  }, [stores]);
+
+  const entityLabel = (log: AuditLog) => {
+    if (log.entity === 'store') {
+      const name = log.storeId != null ? storeNameById.get(String(log.storeId)) : undefined;
+      return name ? `${t('audit.entityStore')} · ${name}` : t('audit.entityStore');
+    }
+    if (log.entity === 'account') return t('audit.entityAccount');
+    return log.entity;
+  };
 
   const rows = useMemo(() => getAutoHandledRows(auditLogs), [auditLogs]);
 
@@ -128,7 +146,12 @@ export function InboxAutoHandledTab({
       render: (value: string) => <Typography.Text style={{ fontSize: 12 }}>{value}</Typography.Text>,
     },
     { title: t('audit.action'), dataIndex: 'action', width: 120 },
-    { title: t('audit.entity'), dataIndex: 'entity', width: 90 },
+    {
+      title: t('audit.entity'),
+      dataIndex: 'entity',
+      width: 150,
+      render: (_, log) => <Typography.Text style={{ fontSize: 12 }}>{entityLabel(log)}</Typography.Text>,
+    },
     {
       title: t('audit.summary'),
       dataIndex: 'summary',
