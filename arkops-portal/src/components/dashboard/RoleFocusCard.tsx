@@ -141,7 +141,12 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
       ? t('roleFocus.biggestGap', {
           store: storeNameOf(weakest.storeId),
           gap: formatMoney(Math.max(0, weakest.goal.target - weakest.goal.current)),
-          pct: String(Math.round(weakest.gapPct)),
+          // P43.1：这里展示的是「达成率」，不能把 gapPct（缺口占比）直接当当前进度。
+          pct: String(
+            weakest.goal.target > 0
+              ? Math.min(100, Math.round((weakest.goal.current / weakest.goal.target) * 100))
+              : 0,
+          ),
         })
       : t('roleFocus.goalOnTrack');
     actions = (

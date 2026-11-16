@@ -652,7 +652,11 @@ export function DashboardPage() {
       {/* ===== P1: 店铺目标 — Agent 动作的业务锚点 ===== */}
       {storeCount > 0 && (
         <div id="store-goal-card">
-          <StoreGoalCard storeId={targetStoreId} />
+          <StoreGoalCard
+            storeId={targetStoreId}
+            storeName={storesData?.find((store) => store.id === targetStoreId)?.name}
+            scopeAllStores={isAllStores}
+          />
         </div>
       )}
 

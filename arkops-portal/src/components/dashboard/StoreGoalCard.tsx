@@ -21,6 +21,10 @@ import type { GoalMetric, GoalPriority, StoreGoal } from '../../types/domain';
 interface StoreGoalCardProps {
   /** 未指定时取当前店铺作用域；都为空则不渲染 */
   storeId?: number;
+  /** P43.1：店名只用于标明这张卡改的是谁，全部店铺范围下尤其必要 */
+  storeName?: string;
+  /** P43.1：全部店铺范围下，这张卡并非账户目标，需就地说明并给出跳转 */
+  scopeAllStores?: boolean;
 }
 
 const METRICS: GoalMetric[] = ['gmv', 'gross_profit', 'inventory_turnover', 'cs_sla'];
@@ -52,7 +56,7 @@ function formatGuardValue(key: GuardHealthKey, value: number) {
   return key === 'monthlyBudgetCap' ? formatMoney(value) : `${value}%`;
 }
 
-export function StoreGoalCard({ storeId }: StoreGoalCardProps) {
+export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalCardProps) {
   const { t } = useI18n();
   const { can } = usePermission();
   const { user, role } = useAuth();
@@ -382,9 +386,11 @@ export function StoreGoalCard({ storeId }: StoreGoalCardProps) {
       size="small"
       style={{ marginBottom: 16 }}
       title={
-        <Space>
+        <Space wrap size={6}>
           <AimOutlined style={{ color: 'var(--ark-blue)' }} />
           <Typography.Text strong>{t('goal.cardTitle')}</Typography.Text>
+          {/* P43.1：全部店铺范围下数字默认落到第一家店，店名必须摆在标题上 */}
+          {storeName ? <Tag color="geekblue">{storeName}</Tag> : null}
           <Tag color="blue">{t('goal.generalTemplate')}</Tag>
         </Space>
       }
@@ -413,6 +419,28 @@ export function StoreGoalCard({ storeId }: StoreGoalCardProps) {
         </Space>
       }
     >
+      {scopeAllStores ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={t('goal.scopeAllHint', { store: storeName ?? t('goal.scopeAllHintStore') })}
+          action={
+            <Button
+              size="small"
+              type="link"
+              style={{ paddingInline: 4 }}
+              onClick={() =>
+                document
+                  .getElementById('portfolio-goals-card')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+            >
+              {t('goal.scopeAllJump')}
+            </Button>
+          }
+        />
+      ) : null}
       <Row gutter={[24, 12]} align="middle">
         <Col xs={24} md={10}>
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
