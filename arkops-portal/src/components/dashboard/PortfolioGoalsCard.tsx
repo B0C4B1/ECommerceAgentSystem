@@ -28,6 +28,7 @@ import {
   Typography,
   message,
 } from 'antd';
+import dayjs from 'dayjs';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { operatingModelApi, type AccountAllocation } from '../../api/operatingModel';
@@ -107,24 +108,43 @@ function AccountGoalSection({
 
   if (storeIds.length <= 1) return null;
 
-  const targetGap = accountGoal ? storeTargetSum - accountGoal.target : 0;
+  /**
+   * P44.1：账户目标只在「写下的那个月」算本月承诺。
+   * 账户目标没有独立周期字段，写入时刻即归属月份（adopt 只会写当月），
+   * 因此用 updatedAt 的月份判定，跨月后自动落回「上期 · 待确认」，不会把上月承诺当本月。
+   */
+  const isCurrent = Boolean(accountGoal && dayjs(accountGoal.updatedAt).isSame(dayjs(), 'month'));
+  const targetGap = accountGoal && isCurrent ? storeTargetSum - accountGoal.target : 0;
 
   return (
     <div style={{ marginBottom: 12 }}>
       <Space size={8} wrap>
         <AimOutlined style={{ color: 'var(--ark-blue)' }} />
         <Typography.Text strong>{t('accountGoal.title')}</Typography.Text>
-        {accountGoal ? (
+        {accountGoal && isCurrent ? (
           <Tag color="blue">
             {t('accountGoal.current', {
               value: formatMoney(accountGoal.target),
               period: accountGoal.periodLabel,
             })}
           </Tag>
+        ) : accountGoal ? (
+          <Tag color="orange">{t('accountGoal.stale')}</Tag>
         ) : (
-          <Tag>{t('accountGoal.unset')}</Tag>
+          <Tag color="orange">{t('accountGoal.unconfirmed')}</Tag>
         )}
-        {suggestion && (
+        {/* 未确认 / 上期：先说清「现在跑的算不算你的承诺」，再给唯一动作。 */}
+        {!isCurrent && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {accountGoal
+              ? t('accountGoal.staleHint', {
+                  value: formatMoney(accountGoal.target),
+                  sum: formatMoney(storeTargetSum),
+                })
+              : t('accountGoal.unconfirmedHint', { sum: formatMoney(storeTargetSum) })}
+          </Typography.Text>
+        )}
+        {!isCurrent && suggestion && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {t('accountGoal.suggest', {
               value: formatMoney(suggestion.target),
@@ -133,8 +153,10 @@ function AccountGoalSection({
             })}
           </Typography.Text>
         )}
-        {accountGoal && (
+        {isCurrent && accountGoal && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('accountGoal.confirmedAt', { date: dayjs(accountGoal.updatedAt).format('MM-DD') })}
+            {' · '}
             {t('accountGoal.sumNote', { value: formatMoney(storeTargetSum) })}
             {Math.abs(targetGap) >= 1
               ? ` · ${t('accountGoal.gapNote', { value: formatMoney(Math.abs(targetGap)) })}`
@@ -144,13 +166,20 @@ function AccountGoalSection({
         {canEdit && (
           <Button
             size="small"
+            type={isCurrent ? 'default' : 'primary'}
             icon={<AimOutlined />}
             onClick={() => {
-              setDraft(accountGoal?.target ?? suggestion?.target ?? null);
+              setDraft(
+                isCurrent ? accountGoal!.target : suggestion?.target ?? accountGoal?.target ?? null,
+              );
               setOpen(true);
             }}
           >
-            {t('accountGoal.open')}
+            {!isCurrent && suggestion
+              ? t('accountGoal.confirmSuggested', { value: formatMoney(suggestion.target) })
+              : isCurrent
+                ? t('accountGoal.open')
+                : t('accountGoal.reopen')}
           </Button>
         )}
       </Space>

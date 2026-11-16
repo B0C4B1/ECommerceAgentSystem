@@ -19,6 +19,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { approvalsApi } from '../../api/approvals';
 import { compareEscalationPriority, exceptionsApi, routeEscalation, summarizeImpact } from '../../api/exceptions';
+import { operatingModelApi } from '../../api/operatingModel';
 import { orchestratorApi } from '../../api/orchestrator';
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
@@ -97,6 +98,25 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
     enabled: focus === 'approver',
   });
 
+  /**
+   * P44.1：Owner 的账户目标是否由人确认过。
+   * 与多店铺概览同一份数据、同一判定（写入月份 = 归属月份），不在首屏另造一套口径。
+   */
+  const multiStore = storeIds.length > 1;
+  const { data: accountGoal } = useQuery({
+    queryKey: ['accountGoal'],
+    queryFn: () => operatingModelApi.getAccountGoal(),
+    enabled: focus === 'owner' && multiStore,
+  });
+  const accountGoalConfirmed = Boolean(
+    accountGoal && dayjs(accountGoal.updatedAt).isSame(dayjs(), 'month'),
+  );
+  const { data: accountGoalSuggestion } = useQuery({
+    queryKey: ['accountGoalSuggestion', storeIds],
+    queryFn: () => operatingModelApi.suggestAccountTarget(storeIds),
+    enabled: focus === 'owner' && multiStore && !accountGoalConfirmed,
+  });
+
   if (!focus) return null;
 
   const storeNameOf = (storeId: number) => stores.find((store) => store.id === storeId)?.name ?? `#${storeId}`;
@@ -118,7 +138,8 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
     const weekActions = rows.reduce((sum, row) => sum + row.realizedThisWeek, 0);
     const pending = rows.reduce((sum, row) => sum + row.pendingCount, 0);
     const weakest = [...rows].sort((a, b) => b.gapPct - a.gapPct)[0];
-    const multiStore = storeIds.length > 1;
+    // P44.1：账户目标没确认时，首屏先说这件事——各店进度再漂亮，也不是人下过的承诺。
+    const goalUnconfirmed = multiStore && !accountGoalConfirmed;
 
     stats = [
       {
@@ -137,27 +158,45 @@ export function RoleFocusCard({ storeIds }: RoleFocusCardProps) {
         hint: t('roleFocus.pendingHint'),
       },
     ];
-    note = weakest
-      ? t('roleFocus.biggestGap', {
-          store: storeNameOf(weakest.storeId),
-          gap: formatMoney(Math.max(0, weakest.goal.target - weakest.goal.current)),
-          // P43.1：这里展示的是「达成率」，不能把 gapPct（缺口占比）直接当当前进度。
-          pct: String(
-            weakest.goal.target > 0
-              ? Math.min(100, Math.round((weakest.goal.current / weakest.goal.target) * 100))
-              : 0,
-          ),
-        })
-      : t('roleFocus.goalOnTrack');
+    note = goalUnconfirmed
+      ? accountGoalSuggestion
+        ? t('roleFocus.accountGoalUnconfirmed', {
+            value: formatMoney(accountGoalSuggestion.target),
+            covered: String(accountGoalSuggestion.coveredStores),
+            total: String(accountGoalSuggestion.storeCount),
+          })
+        : t('roleFocus.accountGoalUnconfirmedNoSuggestion')
+      : weakest
+        ? t('roleFocus.biggestGap', {
+            store: storeNameOf(weakest.storeId),
+            gap: formatMoney(Math.max(0, weakest.goal.target - weakest.goal.current)),
+            // P43.1：这里展示的是「达成率」，不能把 gapPct（缺口占比）直接当当前进度。
+            pct: String(
+              weakest.goal.target > 0
+                ? Math.min(100, Math.round((weakest.goal.current / weakest.goal.target) * 100))
+                : 0,
+            ),
+          })
+        : t('roleFocus.goalOnTrack');
     actions = (
       <Space size={8} wrap>
-        <Button
-          size="small"
-          onClick={() => scrollToCard(multiStore ? 'portfolio-goals-card' : 'store-goal-card')}
-        >
-          {multiStore ? t('roleFocus.adjustAccountGoal') : t('roleFocus.adjustGoal')}
-        </Button>
-        <Button size="small" type="primary" onClick={() => navigate('/setup')}>
+        {goalUnconfirmed ? (
+          <Button
+            size="small"
+            type="primary"
+            onClick={() => scrollToCard('portfolio-goals-card')}
+          >
+            {t('roleFocus.confirmAccountGoal')}
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            onClick={() => scrollToCard(multiStore ? 'portfolio-goals-card' : 'store-goal-card')}
+          >
+            {multiStore ? t('roleFocus.adjustAccountGoal') : t('roleFocus.adjustGoal')}
+          </Button>
+        )}
+        <Button size="small" type={goalUnconfirmed ? 'default' : 'primary'} onClick={() => navigate('/setup')}>
           {t('roleFocus.delegation')}
         </Button>
       </Space>
