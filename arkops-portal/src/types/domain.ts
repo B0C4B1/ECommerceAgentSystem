@@ -529,8 +529,24 @@ export interface StoreGoal {
   };
   /** 最近一次跨月结转的结算结果；从未跨月为 undefined。 */
   lastSettlement?: GoalPeriodSettlement;
+  /** P47：临时放宽的护栏。到期后 Agent 只在当前值仍等于临时值时才恢复原值。 */
+  guardExpiries?: GuardExpiries;
   updatedAt: string;
 }
+
+/** P47：单条临时护栏的到期信息。 */
+export interface GuardExpiry {
+  /** 人设的临时值。 */
+  value: number;
+  /** 到期后恢复的原值。 */
+  baseValue: number;
+  /** 到期时间（ISO，含当天结束）。 */
+  until: string;
+  /** 人设定临时值的时间，用于回看。 */
+  setAt: string;
+}
+
+export type GuardExpiries = Partial<Record<keyof StoreGoal['constraints'], GuardExpiry>>;
 
 /**
  * P29.3 账户级目标 — 人只下一个账户月度 GMV 目标，分配到店由 Agent 计算。

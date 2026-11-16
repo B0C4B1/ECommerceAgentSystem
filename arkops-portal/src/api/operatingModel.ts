@@ -23,6 +23,7 @@ import type {
   EffectivePolicy,
   GoalMetric,
   GoalPeriodSettlement,
+  GuardExpiries,
   MerchantProfile,
   OperatingPolicy,
   RiskLevel,
@@ -148,6 +149,8 @@ export interface GuardChangeMeta {
   reason: string;
   actor: string;
   actorRole?: string;
+  /** P47：本次变更临时生效的天数；不传表示长期生效。 */
+  expiresInDays?: number;
 }
 
 /**
@@ -749,12 +752,38 @@ export const operatingModelApi = {
       periodKey: currentPeriodKey(),
       updatedAt: new Date().toISOString(),
     };
+
+    // P47：这次改动若声明了临时天数，就记下「临时值 / 原值 / 到期时间」；
+    // 不带期限的新改动会清掉该字段旧的期限，避免旧的临时值在到期后反过来覆盖新值。
+    let expiryUntil: string | null = null;
+    if (guardChanges.length > 0) {
+      const days = Math.min(30, Math.max(1, Math.round(meta?.expiresInDays ?? 0)));
+      const expiries: GuardExpiries = { ...(goal.guardExpiries ?? {}) };
+      if (days > 0) expiryUntil = dayjs().add(days, 'day').endOf('day').toISOString();
+      guardChanges.forEach((change) => {
+        if (expiryUntil) {
+          expiries[change.field] = {
+            value: next.constraints[change.field],
+            baseValue: goal.constraints[change.field],
+            until: expiryUntil,
+            setAt: next.updatedAt,
+          };
+        } else {
+          delete expiries[change.field];
+        }
+      });
+      next.guardExpiries = Object.keys(expiries).length > 0 ? expiries : undefined;
+    }
+
     const index = goals.findIndex((g) => g.storeId === storeId);
     if (index >= 0) goals[index] = next;
     else goals.push(next);
 
     if (guardChanges.length > 0) {
       const actor = `${meta?.actor?.trim() || '当前用户'}${meta?.actorRole ? `（${meta.actorRole}）` : ''}`;
+      const expiryNote = expiryUntil
+        ? `；临时至 ${dayjs(expiryUntil).format('MM-DD HH:mm')}，到期自动恢复`
+        : '';
       guardChanges.forEach((change) => {
         recordAuditLog({
           actor,
@@ -762,7 +791,7 @@ export const operatingModelApi = {
           entity: 'store',
           entityId: storeId,
           storeId,
-          summary: `${change.label} ${change.from} → ${change.to}；原因：${reason}`,
+          summary: `${change.label} ${change.from} → ${change.to}；原因：${reason}${expiryNote}`,
           category: 'human_ops',
           linkTo: `/dashboard?storeId=${storeId}`,
           // P45.1：摘要给人读，原值留给「撤销回到变更前」。
@@ -791,6 +820,57 @@ export const operatingModelApi = {
       });
     }
     return mockDelay(next);
+  },
+
+  /**
+   * P47：临时护栏到期收回。Agent 只在「当前值仍等于当初设的临时值」时恢复原值；
+   * 人后来改过这个字段，就只清掉过期标记，不拿旧值覆盖人的新决定。
+   */
+  restoreExpiredGuards: (storeId: AllMallId) => {
+    const index = goals.findIndex((g) => g.storeId === storeId);
+    const goal = index >= 0 ? goals[index] : undefined;
+    if (!goal?.guardExpiries) return mockDelay({ restored: 0, cleared: 0 });
+
+    const now = dayjs();
+    const nextExpiries: GuardExpiries = { ...goal.guardExpiries };
+    const nextConstraints = { ...goal.constraints };
+    let restored = 0;
+    let cleared = 0;
+
+    (Object.keys(goal.guardExpiries) as Array<keyof StoreGoal['constraints']>).forEach((key) => {
+      const expiry = goal.guardExpiries?.[key];
+      if (!expiry || now.isBefore(dayjs(expiry.until))) return;
+      delete nextExpiries[key];
+      cleared += 1;
+      // 人此后改过该字段：放弃回收，只清理过期标记。
+      if (goal.constraints[key] !== expiry.value) return;
+
+      const field = GUARD_FIELDS.find((item) => item.key === key);
+      const format = field?.format ?? ((value: number) => `${value}`);
+      nextConstraints[key] = expiry.baseValue;
+      recordAuditLog({
+        actor: 'Agent（治理巡检）',
+        action: '恢复护栏',
+        entity: 'store',
+        entityId: storeId,
+        storeId,
+        summary: `${field?.label ?? key} ${format(expiry.value)} → ${format(expiry.baseValue)}；原因：临时护栏到期（原定 ${dayjs(expiry.until).format('MM-DD HH:mm')}）自动恢复`,
+        category: 'agent_action',
+        linkTo: `/dashboard?storeId=${storeId}`,
+        guardChanges: [{ field: key, from: expiry.value, to: expiry.baseValue }],
+      });
+      restored += 1;
+    });
+
+    if (cleared === 0) return mockDelay({ restored: 0, cleared: 0 });
+    goals[index] = {
+      ...goal,
+      constraints: nextConstraints,
+      guardExpiries: Object.keys(nextExpiries).length > 0 ? nextExpiries : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    saveMockPersistence();
+    return mockDelay({ restored, cleared });
   },
 
   /**
@@ -1024,7 +1104,9 @@ export const operatingModelApi = {
     mockDelay(
       getAuditLogs()
         .filter(
-          (log) => log.storeId === storeId && (log.action === '变更护栏' || log.action === '确认护栏'),
+          (log) =>
+            log.storeId === storeId &&
+            (log.action === '变更护栏' || log.action === '确认护栏' || log.action === '恢复护栏'),
         )
         .reverse(),
     ),

@@ -33,6 +33,7 @@ import type {
   CycleTrigger,
   GoalMetric,
   GoalOutcome,
+  GuardExpiry,
   InventoryItem,
   OperatingCycle,
   OperatingPolicy,
@@ -734,6 +735,10 @@ export interface GovernanceSweepResult {
   ruleApplied: number;
   /** 按超时默认收尾的升级数。 */
   expiredApplied: number;
+  /** P47：临时护栏到期后由 Agent 恢复原值的条数。 */
+  guardRestored: number;
+  /** P47：到期时发现人已改过、仅清掉过期标记的条数。 */
+  guardExpiryCleared: number;
   /** 是否有任何变化（false 时不打扰人）。 */
   changed: boolean;
 }
@@ -1183,6 +1188,8 @@ export interface GuardHealthItem {
   verdict: GuardHealthVerdict;
   /** P32.2 建议值：与体检结论同源，不另算一套口径。 */
   advice: GuardAdvice;
+  /** P47：这条护栏是否处于临时生效期；到期后 Agent 会恢复原值。 */
+  expiry?: GuardExpiry;
 }
 
 /** P32.1 护栏体检：让人看清哪条护栏在约束 Agent、哪条仍是平台模板值。 */
@@ -1953,6 +1960,7 @@ export const orchestratorApi = {
         headroom: marginHeadroom,
         verdict: verdictOf(marginBlocks, marginHeadroom),
         advice: buildAdvice('minGrossMargin', verdictOf(marginBlocks, marginHeadroom)),
+        expiry: goal.guardExpiries?.minGrossMargin,
       },
       {
         key: 'maxDiscountPct',
@@ -1963,6 +1971,7 @@ export const orchestratorApi = {
         headroom: discountHeadroom,
         verdict: verdictOf(discountBlocks, discountHeadroom),
         advice: buildAdvice('maxDiscountPct', verdictOf(discountBlocks, discountHeadroom)),
+        expiry: goal.guardExpiries?.maxDiscountPct,
       },
       {
         key: 'monthlyBudgetCap',
@@ -1973,6 +1982,7 @@ export const orchestratorApi = {
         headroom: budgetHeadroom,
         verdict: verdictOf(budgetBlocks, budgetHeadroom),
         advice: buildAdvice('monthlyBudgetCap', verdictOf(budgetBlocks, budgetHeadroom)),
+        expiry: goal.guardExpiries?.monthlyBudgetCap,
       },
     ];
 
@@ -3004,11 +3014,17 @@ export const orchestratorApi = {
     let settled = 0;
     let paceChanged = 0;
     let guardChanged = 0;
+    let guardRestored = 0;
+    let guardExpiryCleared = 0;
     for (const storeId of ids) {
       const period = await operatingModelApi.settleGoalPeriod(storeId);
       if (period.settled) settled += 1;
       const pace = await operatingModelApi.syncGoalPaceEscalation(storeId);
       if (pace.escalated || pace.closed > 0) paceChanged += 1;
+      // P47：临时护栏到期由 Agent 收回；人后来改过的字段只清标记、不覆盖。
+      const expiries = await operatingModelApi.restoreExpiredGuards(storeId);
+      guardRestored += expiries.restored;
+      guardExpiryCleared += expiries.cleared;
     }
     // P38.1：护栏升级按账户口径一次同步，同一条护栏的多店提醒在这里合并。
     const guard = await syncGuardEscalationsAcross(ids);
@@ -3016,7 +3032,9 @@ export const orchestratorApi = {
     // 全局收尾：人的决策规则优先，其次超时默认；两者都只处理已到期/已可判定的条目。
     const ruleApplied = await orchestratorApi.applyDecisionRules();
     const expiredApplied = await orchestratorApi.applyExpiredDecisionDefaults();
-    const changed = settled + paceChanged + guardChanged + ruleApplied + expiredApplied > 0;
+    const changed =
+      settled + paceChanged + guardChanged + ruleApplied + expiredApplied + guardRestored + guardExpiryCleared >
+      0;
     return {
       storeCount: ids.length,
       settled,
@@ -3024,6 +3042,8 @@ export const orchestratorApi = {
       guardChanged,
       ruleApplied,
       expiredApplied,
+      guardRestored,
+      guardExpiryCleared,
       changed,
     };
   },

@@ -63,6 +63,8 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<StoreGoal | null>(null);
   const [reason, setReason] = useState('');
+  /** P47：本次护栏改动临时生效的天数；0 表示长期生效。 */
+  const [expiryDays, setExpiryDays] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   /** P32.1：护栏体检抽屉——只读说明每条护栏现在是否真的在约束 Agent。 */
   const [healthOpen, setHealthOpen] = useState(false);
@@ -179,7 +181,13 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
           constraints: next.constraints,
         },
         // P28.2：旧值→新值、原因、确认人一起进审计，人不写原因就改不了护栏。
-        { reason, actor: user?.name ?? '当前用户', actorRole: role ?? undefined },
+        // P47：带上临时期限，到期由 Agent 自动恢复原值。
+        {
+          reason,
+          actor: user?.name ?? '当前用户',
+          actorRole: role ?? undefined,
+          expiresInDays: expiryDays || undefined,
+        },
       ),
     onError: (error) => {
       message.error((error as Error).message);
@@ -192,6 +200,7 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
       queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
       setEditing(null);
       setReason('');
+      setExpiryDays(0);
       // 目标/护栏是仲裁输入：改完后立即让 Agent 按新约束重跑一轮，而不是等人再点“重新生成”。
       queryClient.invalidateQueries({ queryKey: ['operatingCycle', saved.storeId] });
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
@@ -407,6 +416,7 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
     if (suggested === null) return;
     setHealthOpen(false);
     setReason('');
+    setExpiryDays(0);
     setEditing({
       ...goal,
       constraints: { ...goal.constraints, [item.key]: suggested },
@@ -442,6 +452,7 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
               icon={<EditOutlined />}
               onClick={() => {
                 setReason('');
+                setExpiryDays(0);
                 setEditing(goal);
               }}
             >
@@ -551,9 +562,25 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
             <Tag color="purple">
               {t('goal.priorityLabel')}: {t(`goal.priority_${goal.priority}`)}
             </Tag>
-            <Tag color={guardTagColor('minGrossMargin')}>{t('goal.minGrossMargin')} ≥ {goal.constraints.minGrossMargin}%</Tag>
-            <Tag color={guardTagColor('maxDiscountPct')}>{t('goal.maxDiscount')} ≤ {goal.constraints.maxDiscountPct}%</Tag>
-            <Tag color={guardTagColor('monthlyBudgetCap')}>{t('goal.monthlyBudgetCap')} ≤ ¥{new Intl.NumberFormat('zh-CN').format(goal.constraints.monthlyBudgetCap)}</Tag>
+            {(Object.keys(GUARD_LABEL_KEYS) as GuardHealthKey[]).map((key) => (
+              <Space key={key} size={4} wrap>
+                <Tag color={guardTagColor(key)}>
+                  {key === 'minGrossMargin'
+                    ? `${t('goal.minGrossMargin')} ≥ ${goal.constraints.minGrossMargin}%`
+                    : key === 'maxDiscountPct'
+                      ? `${t('goal.maxDiscount')} ≤ ${goal.constraints.maxDiscountPct}%`
+                      : `${t('goal.monthlyBudgetCap')} ≤ ${formatGuardValue(key, goal.constraints.monthlyBudgetCap)}`}
+                </Tag>
+                {/* P47：临时放宽必须显式到期，人不用记「哪天该收」。 */}
+                {goal.guardExpiries?.[key] && (
+                  <Tag color="gold" style={{ margin: 0 }}>
+                    {t('goal.guardTemporaryTag', {
+                      time: dayjs(goal.guardExpiries[key]!.until).format('MM-DD HH:mm'),
+                    })}
+                  </Tag>
+                )}
+              </Space>
+            ))}
           </Space>
           {guardHealth && (
             <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
@@ -603,6 +630,8 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
           {guardChanges.map((change) => {
             const guardChange = change.guardChanges?.[0];
             // P45.1：只有「这条变更的值现在仍然生效」才允许撤销，否则会覆盖后来的人为调整。
+            // P47：Agent 到期恢复不是人的决定，不提供「撤销恢复」（否则又会把放宽值放回去）。
+            const reversible = change.action === '变更护栏';
             const stillEffective = Boolean(
               guardChange && goal && goal.constraints[guardChange.field] === guardChange.to,
             );
@@ -613,7 +642,7 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
                 </Typography.Text>
                 <Typography.Paragraph style={{ marginBottom: 0 }}>
                   {change.summary}
-                  {canEdit && guardChange && goal && (
+                  {canEdit && guardChange && goal && reversible && (
                     stillEffective ? (
                       <Button
                         type="link"
@@ -672,6 +701,15 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
                   ? t('goal.health.blocks', { days: guardHealth?.windowDays ?? 7, count: item.blocks7d })
                   : t('goal.health.noBlocks', { days: guardHealth?.windowDays ?? 7 })}
               </Typography.Text>
+              {/* P47：体检要能看出这条是临时放宽，以及到期后由 Agent 收回成什么值。 */}
+              {item.expiry && (
+                <Typography.Text style={{ display: 'block', fontSize: 12, color: 'var(--ark-orange)' }}>
+                  {t('goal.health.temporary', {
+                    time: dayjs(item.expiry.until).format('MM-DD HH:mm'),
+                    value: formatGuardValue(item.key, item.expiry.baseValue),
+                  })}
+                </Typography.Text>
+              )}
               {/* P32.2：Agent 给建议值 + 依据 + 预演后果；人只决定要不要带入。 */}
               <Space size={6} wrap style={{ marginTop: 2 }}>
                 <Typography.Text
@@ -731,7 +769,10 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
         cancelText={t('common.cancel')}
         confirmLoading={mutation.isPending}
         okButtonProps={{ disabled: pendingGuardChanges.length > 0 && !reason.trim() }}
-        onCancel={() => setEditing(null)}
+        onCancel={() => {
+          setEditing(null);
+          setExpiryDays(0);
+        }}
         onOk={() => editing && mutation.mutate(editing)}
         destroyOnClose
       >
@@ -905,6 +946,30 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
                         </Typography.Text>
                       </div>
                     )}
+                    {/* P47：临时放宽说清「放到哪天」，到期由 Agent 收回，人不靠记忆。 */}
+                    <div>
+                      <Typography.Text type="secondary">{t('goal.guardDurationLabel')}</Typography.Text>
+                      <Select
+                        style={{ width: '100%', marginTop: 4 }}
+                        value={expiryDays}
+                        onChange={setExpiryDays}
+                        options={[0, 1, 3, 7, 14, 30].map((days) => ({
+                          value: days,
+                          label:
+                            days === 0
+                              ? t('goal.guardDurationLong')
+                              : t('goal.guardDurationDays', { days }),
+                        }))}
+                      />
+                      {expiryDays > 0 && (
+                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+                          {t('goal.guardDurationHint', {
+                            time: dayjs().add(expiryDays, 'day').endOf('day').format('MM-DD HH:mm'),
+                            values: pendingGuardChanges.map((change) => `${change.label} ${change.from}`).join('、'),
+                          })}
+                        </Typography.Text>
+                      )}
+                    </div>
                     <Input.TextArea
                       rows={2}
                       maxLength={120}
