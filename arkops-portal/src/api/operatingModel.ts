@@ -303,6 +303,147 @@ function buildGoalProposal(storeId: AllMallId): GoalProposal | null {
   };
 }
 
+/**
+ * P46 预算池跟着目标走：账户广告预算是一个池子，但「目标 → 所需广告预算」此前只停在单店
+ * 目标提议里，撞池时人只能去改预算池或延后动作。这里把各店「目标所需 vs 当前池」摆到账户层，
+ * 由 Agent 在账户总额不变的前提下把富余挪给缺口最大的店，人只做一次确认。
+ */
+export interface BudgetPoolRow {
+  storeId: AllMallId;
+  storeName: string;
+  hasBaseline: boolean;
+  target: number;
+  /** 按当前节奏的月末预计 GMV；无经营基线时为 null。 */
+  projectedMonthEnd: number | null;
+  /** 本月至今广告花费（与目标提议同源）。 */
+  mtdAdSpend: number;
+  /** 按 ROAS 填平月末缺口还需的增量广告预算。 */
+  requiredAdBudget: number;
+  /** 本月达到目标所需的广告总额 = 已花 + 还需。 */
+  neededAdMonthly: number;
+  /** 当前广告月预算池。 */
+  adPoolMonthly: number;
+  promoPoolMonthly: number;
+  /** 正数 = 缺口，负数 = 富余。 */
+  gap: number;
+  /** 单店 ROAS；无基线时为 null，不参与收益估算。 */
+  roas: number | null;
+  role: 'receiver' | 'donor' | 'balanced';
+  /** 从本店转出的金额。 */
+  give: number;
+  /** 转入本店的金额。 */
+  take: number;
+  /** 再分配后的广告月预算池。 */
+  nextAdPool: number;
+}
+
+export interface BudgetPoolProposal {
+  rows: BudgetPoolRow[];
+  /** 账户广告预算池总额：再分配前后必须一致。 */
+  accountAdTotal: number;
+  totalShortage: number;
+  totalSurplus: number;
+  /** 本轮实际挪动的金额。 */
+  allocated: number;
+  /** 富余全部挪出后仍未补上的缺口。 */
+  uncovered: number;
+  /** 按各店 ROAS 估算的额外回写 GMV（只算真正转入的金额）。 */
+  expectedGmvGain: number;
+  moves: Array<{ fromStoreId: AllMallId; toStoreId: AllMallId; amount: number }>;
+}
+
+/** 太小的钱挪来挪去只会制造噪音，也不值得人确认一次。 */
+const BUDGET_MOVE_MIN = 100;
+
+function buildBudgetPoolProposal(storeIds: AllMallId[]): BudgetPoolProposal {
+  const rows: BudgetPoolRow[] = storeIds.map((storeId) => {
+    const goal = goals.find((g) => g.storeId === storeId) ?? defaultGoal(storeId);
+    const store = stores.find((s) => s.id === storeId);
+    const policy = policies.find((p) => p.storeId === storeId);
+    const pool = policy?.budgetPool ?? DEFAULT_BUDGET_POOL;
+    const baseline = store && goal.metric === 'gmv' ? getStoreOperatingBaseline(store.name) : null;
+    const base = {
+      storeId,
+      storeName: store?.name ?? `#${storeId}`,
+      target: goal.target,
+      adPoolMonthly: pool.adMonthly,
+      promoPoolMonthly: pool.promoMonthly,
+      nextAdPool: pool.adMonthly,
+      give: 0,
+      take: 0,
+      role: 'balanced' as const,
+    };
+    if (!baseline) {
+      return {
+        ...base,
+        hasBaseline: false,
+        projectedMonthEnd: null,
+        mtdAdSpend: 0,
+        requiredAdBudget: 0,
+        neededAdMonthly: pool.adMonthly,
+        gap: 0,
+        roas: null,
+      };
+    }
+    const gapGmv = Math.max(0, goal.target - baseline.projectedMonthGmv);
+    const requiredAdBudget = Math.round(gapGmv / baseline.roas);
+    const neededAdMonthly = baseline.mtdAdSpend + requiredAdBudget;
+    return {
+      ...base,
+      hasBaseline: true,
+      projectedMonthEnd: baseline.projectedMonthGmv,
+      mtdAdSpend: baseline.mtdAdSpend,
+      requiredAdBudget,
+      neededAdMonthly,
+      gap: neededAdMonthly - pool.adMonthly,
+      roas: baseline.roas,
+    };
+  });
+
+  const receivers = rows.filter((row) => row.gap >= BUDGET_MOVE_MIN).sort((a, b) => b.gap - a.gap);
+  const donors = rows
+    .filter((row) => row.gap <= -BUDGET_MOVE_MIN)
+    .sort((a, b) => a.gap - b.gap)
+    .map((row) => ({ row, left: -row.gap }));
+  const totalShortage = receivers.reduce((sum, row) => sum + row.gap, 0);
+  const totalSurplus = donors.reduce((sum, item) => sum + item.left, 0);
+  const moves: BudgetPoolProposal['moves'] = [];
+
+  // 只把富余挪到「本店自己也不够」的店，且每家店不会被挪到低于自身所需。
+  receivers.forEach((receiver) => {
+    let need = receiver.gap;
+    donors.forEach((donor) => {
+      if (need < BUDGET_MOVE_MIN || donor.left < BUDGET_MOVE_MIN) return;
+      const amount = Math.min(need, donor.left);
+      if (amount < BUDGET_MOVE_MIN) return;
+      need -= amount;
+      donor.left -= amount;
+      donor.row.give += amount;
+      receiver.take += amount;
+      moves.push({ fromStoreId: donor.row.storeId, toStoreId: receiver.storeId, amount });
+    });
+  });
+
+  rows.forEach((row) => {
+    row.nextAdPool = row.adPoolMonthly - row.give + row.take;
+    row.role = row.give > 0 ? 'donor' : row.gap > 0 ? 'receiver' : 'balanced';
+  });
+
+  const allocated = rows.reduce((sum, row) => sum + row.take, 0);
+  return {
+    rows,
+    accountAdTotal: rows.reduce((sum, row) => sum + row.adPoolMonthly, 0),
+    totalShortage,
+    totalSurplus,
+    allocated,
+    uncovered: Math.max(0, totalShortage - allocated),
+    expectedGmvGain: Math.round(
+      rows.reduce((sum, row) => sum + (row.roas ? row.take * row.roas : 0), 0),
+    ),
+    moves,
+  };
+}
+
 export interface GoalPaceSync {
   pace: GoalPace | null;
   /** 本轮是否新建了升级项（已有未处理的不会重复创建）。 */
@@ -621,6 +762,54 @@ export const operatingModelApi = {
       { constraints: { ...goal.constraints, [change.field]: change.from } },
       { ...meta, reason },
     );
+  },
+
+  /**
+   * P46.1/P46.2：账户广告预算再分配。只算不写，供账户目标卡展示缺口、富余与挪移方案。
+   */
+  getBudgetPoolProposal: (storeIds: AllMallId[]) => mockDelay(buildBudgetPoolProposal(storeIds)),
+
+  /**
+   * 人确认后一次性写回：账户总额守恒是硬约束，任何会让总额变化的方案直接拒绝。
+   * 只写有实际挪移的店，保留原自主等级与促销预算池；每店一条审计，写清旧值 → 新值与来源。
+   */
+  reallocateAdBudget: (storeIds: AllMallId[], meta: { actor: string; actorRole?: string }) => {
+    const proposal = buildBudgetPoolProposal(storeIds);
+    if (proposal.moves.length === 0) {
+      throw new Error('当前账户没有可再分配的广告预算');
+    }
+    const after = proposal.rows.reduce((sum, row) => sum + row.nextAdPool, 0);
+    if (Math.abs(after - proposal.accountAdTotal) > 0.5) {
+      throw new Error('再分配前后账户广告预算池必须一致');
+    }
+    const at = dayjs().format('MM-DD HH:mm');
+    const actor = `${meta.actor.trim() || '当前用户'}${meta.actorRole ? `（${meta.actorRole}）` : ''}`;
+    proposal.rows
+      .filter((row) => row.give > 0 || row.take > 0)
+      .forEach((row) => {
+        const index = policies.findIndex((p) => p.storeId === row.storeId);
+        const current = index >= 0 ? policies[index] : undefined;
+        const next: OperatingPolicy = {
+          storeId: row.storeId,
+          autonomy: current?.autonomy ?? operatingModelApi.getEffectivePolicy(row.storeId).autonomy,
+          budgetPool: { adMonthly: row.nextAdPool, promoMonthly: row.promoPoolMonthly },
+          updatedAt: new Date().toISOString(),
+        };
+        if (index >= 0) policies[index] = next;
+        else policies.push(next);
+        const move = row.give > 0 ? `转出 ¥${row.give}` : `转入 ¥${row.take}`;
+        recordAuditLog({
+          actor,
+          action: '调整广告预算池',
+          entity: 'store',
+          entityId: row.storeId,
+          storeId: row.storeId,
+          summary: `广告月预算池 ¥${row.adPoolMonthly} → ¥${row.nextAdPool}（${move}，账户再分配 ${at}）`,
+          category: 'human_ops',
+          linkTo: `/dashboard?storeId=${row.storeId}`,
+        });
+      });
+    return mockDelay(proposal);
   },
 
   /**

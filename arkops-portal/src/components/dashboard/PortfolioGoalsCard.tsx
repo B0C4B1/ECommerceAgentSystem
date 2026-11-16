@@ -9,7 +9,7 @@
  * P16：跨店方案的采纳/忽略已并入待办中心（与单店升级项同一个裁决入口），
  * 本卡只保留跨店预算与待拍板数量，避免出现第二套决策面板。
  */
-import { AimOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { AimOutlined, SafetyCertificateOutlined, WalletOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -31,7 +31,11 @@ import {
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { operatingModelApi, type AccountAllocation } from '../../api/operatingModel';
+import {
+  operatingModelApi,
+  type AccountAllocation,
+  type BudgetPoolProposal,
+} from '../../api/operatingModel';
 import { orchestratorApi, type StorePortfolioRow } from '../../api/orchestrator';
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
@@ -100,6 +104,7 @@ function AccountGoalSection({
       queryClient.invalidateQueries({ queryKey: ['guardChanges'] });
       queryClient.invalidateQueries({ queryKey: ['goalPace'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['budgetPool'] });
       queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
       setOpen(false);
       message.success(t('accountGoal.saved', { count: String(result.goals.length) }));
@@ -295,6 +300,235 @@ function AccountGoalSection({
           />
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {t('accountGoal.auditNote')}
+          </Typography.Text>
+        </Space>
+      </Modal>
+    </div>
+  );
+}
+
+/**
+ * P46 预算池跟着目标走：账户广告预算总额不变，只把「超出自身所需」的富余挪给缺口店。
+ * Agent 算缺口、排顺序、给预期回写；人只确认一次，确认后才写回预算池。
+ */
+function BudgetPoolSection({ storeIds }: { storeIds: AllMallId[] }) {
+  const { t } = useI18n();
+  const { can } = usePermission();
+  const { user, role } = useAuth();
+  const queryClient = useQueryClient();
+  const canEdit = can('setup', 'update');
+  const [open, setOpen] = useState(false);
+
+  const { data: proposal } = useQuery({
+    queryKey: ['budgetPool', storeIds],
+    queryFn: () => operatingModelApi.getBudgetPoolProposal(storeIds),
+    enabled: storeIds.length > 1,
+  });
+
+  const apply = useMutation({
+    mutationFn: () =>
+      operatingModelApi.reallocateAdBudget(storeIds, {
+        actor: user?.name ?? '当前用户',
+        actorRole: role ?? undefined,
+      }),
+    onError: (error) => message.error((error as Error).message),
+    onSuccess: (result) => {
+      [
+        'storeGoal',
+        'portfolio',
+        'guardHealth',
+        'accountGuards',
+        'crossStoreArbitration',
+        'audit-logs',
+        'budgetPool',
+      ].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
+      setOpen(false);
+      message.success(t('budgetPool.saved', { count: String(result.moves.length) }));
+    },
+  });
+
+  if (storeIds.length <= 1 || !proposal) return null;
+
+  const hasMoves = proposal.moves.length > 0;
+  const movesText = proposal.moves
+    .map((move) => {
+      const from = proposal.rows.find((row) => row.storeId === move.fromStoreId)?.storeName;
+      const to = proposal.rows.find((row) => row.storeId === move.toStoreId)?.storeName;
+      return t('budgetPool.movesPair', {
+        from: from ?? `#${move.fromStoreId}`,
+        to: to ?? `#${move.toStoreId}`,
+        amount: formatMoney(move.amount),
+      });
+    })
+    .join('；');
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <Space size={8} wrap>
+        <WalletOutlined style={{ color: 'var(--ark-blue)' }} />
+        <Typography.Text strong>{t('budgetPool.title')}</Typography.Text>
+        {hasMoves ? (
+          <Tag color="orange">{t('budgetPool.movable', { amount: formatMoney(proposal.allocated) })}</Tag>
+        ) : (
+          <Tag color="green">{t('budgetPool.balanced')}</Tag>
+        )}
+        {proposal.uncovered > 0 && (
+          <Tag color="red">{t('budgetPool.uncovered', { value: formatMoney(proposal.uncovered) })}</Tag>
+        )}
+        {canEdit && (
+          <Button
+            size="small"
+            icon={<WalletOutlined />}
+            onClick={() => setOpen(true)}
+          >
+            {t('budgetPool.open')}
+          </Button>
+        )}
+      </Space>
+      <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+        {hasMoves
+          ? t('budgetPool.summary', {
+              pool: formatMoney(proposal.accountAdTotal),
+              shortage: formatMoney(proposal.totalShortage),
+              surplus: formatMoney(proposal.totalSurplus),
+            })
+          : proposal.uncovered > 0
+            ? t('budgetPool.summaryNoSurplus', {
+                pool: formatMoney(proposal.accountAdTotal),
+                shortage: formatMoney(proposal.uncovered),
+              })
+            : t('budgetPool.summaryBalanced', { pool: formatMoney(proposal.accountAdTotal) })}
+      </Typography.Text>
+
+      <Modal
+        open={open}
+        width={860}
+        title={t('budgetPool.modalTitle')}
+        onCancel={() => setOpen(false)}
+        destroyOnClose
+        footer={
+          <Space>
+            <Button onClick={() => setOpen(false)}>{t('common.cancel')}</Button>
+            <Button
+              type="primary"
+              loading={apply.isPending}
+              disabled={!hasMoves}
+              onClick={() => apply.mutate()}
+            >
+              {t('budgetPool.confirm')}
+            </Button>
+          </Space>
+        }
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon message={t('budgetPool.basis')} />
+          {!hasMoves && (
+            <Alert type="warning" showIcon message={t('budgetPool.noMovesWarn')} />
+          )}
+          {proposal.uncovered > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              message={t('budgetPool.uncoveredWarn', { value: formatMoney(proposal.uncovered) })}
+            />
+          )}
+          <Table
+            rowKey="storeId"
+            size="small"
+            pagination={false}
+            dataSource={proposal.rows}
+            columns={[
+              {
+                title: t('budgetPool.colStore'),
+                render: (_: unknown, row: BudgetPoolProposal['rows'][number]) => (
+                  <Space size={4} wrap>
+                    <Typography.Text strong style={{ fontSize: 13 }}>
+                      {row.storeName}
+                    </Typography.Text>
+                    {row.give > 0 && <Tag color="blue">{t('budgetPool.roleGive')}</Tag>}
+                    {row.take > 0 && <Tag color="green">{t('budgetPool.roleTake')}</Tag>}
+                    {row.gap > 0 && row.take === 0 && (
+                      <Tag color="red">{t('budgetPool.roleUnfunded')}</Tag>
+                    )}
+                  </Space>
+                ),
+              },
+              {
+                title: t('budgetPool.colTarget'),
+                align: 'right' as const,
+                render: (_: unknown, row: BudgetPoolProposal['rows'][number]) =>
+                  row.hasBaseline && row.projectedMonthEnd !== null ? (
+                    <div>
+                      <Typography.Text>{formatMoney(row.projectedMonthEnd)}</Typography.Text>
+                      <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
+                        {t('budgetPool.targetHint', { value: formatMoney(row.target) })}
+                      </Typography.Text>
+                    </div>
+                  ) : (
+                    <Typography.Text type="secondary">{t('budgetPool.noBaseline')}</Typography.Text>
+                  ),
+              },
+              {
+                title: t('budgetPool.colNeeded'),
+                align: 'right' as const,
+                render: (_: unknown, row: BudgetPoolProposal['rows'][number]) =>
+                  row.hasBaseline ? (
+                    <div>
+                      <Typography.Text strong>{formatMoney(row.neededAdMonthly)}</Typography.Text>
+                      <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
+                        {t('budgetPool.neededHint', {
+                          spent: formatMoney(row.mtdAdSpend),
+                          required: formatMoney(row.requiredAdBudget),
+                        })}
+                      </Typography.Text>
+                    </div>
+                  ) : (
+                    <Typography.Text type="secondary">—</Typography.Text>
+                  ),
+              },
+              {
+                title: t('budgetPool.colPool'),
+                align: 'right' as const,
+                render: (_: unknown, row: BudgetPoolProposal['rows'][number]) =>
+                  formatMoney(row.adPoolMonthly),
+              },
+              {
+                title: t('budgetPool.colDelta'),
+                align: 'right' as const,
+                render: (_: unknown, row: BudgetPoolProposal['rows'][number]) => {
+                  const delta = row.take - row.give;
+                  if (delta === 0) return <Typography.Text type="secondary">—</Typography.Text>;
+                  return (
+                    <Typography.Text style={{ color: delta > 0 ? 'var(--ark-green)' : 'var(--ark-red)' }}>
+                      {delta > 0 ? '+' : '-'}
+                      {formatMoney(Math.abs(delta))}
+                    </Typography.Text>
+                  );
+                },
+              },
+              {
+                title: t('budgetPool.colNext'),
+                align: 'right' as const,
+                render: (_: unknown, row: BudgetPoolProposal['rows'][number]) => (
+                  <Typography.Text strong={row.give > 0 || row.take > 0}>
+                    {formatMoney(row.nextAdPool)}
+                  </Typography.Text>
+                ),
+              },
+            ]}
+          />
+          {hasMoves && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t('budgetPool.movesNote', { moves: movesText })}
+            </Typography.Text>
+          )}
+          {proposal.expectedGmvGain > 0 && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t('budgetPool.gain', { value: formatMoney(proposal.expectedGmvGain) })}
+            </Typography.Text>
+          )}
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('budgetPool.auditNote')}
           </Typography.Text>
         </Space>
       </Modal>
@@ -630,6 +864,7 @@ export function PortfolioGoalsCard() {
       }
     >
       <AccountGoalSection storeIds={storeIds} storeTargetSum={storeTargetSum} />
+      <BudgetPoolSection storeIds={storeIds} />
       <AccountGuardSection storeIds={storeIds} />
       <Table
         rowKey="storeId"
