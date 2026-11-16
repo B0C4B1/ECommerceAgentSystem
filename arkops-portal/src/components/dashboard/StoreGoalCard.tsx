@@ -215,6 +215,38 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
   });
 
   /**
+   * P45.1：护栏改错就地回到变更前。撤销本身仍是一次带原因的护栏变更，
+   * 所以重跑一轮 Agent 让动作按恢复后的边界重排，而不是留着按放宽值生成的动作。
+   */
+  const revertMutation = useMutation({
+    mutationFn: (auditLogId: number) =>
+      operatingModelApi.revertGuardChange(storeId!, auditLogId, {
+        actor: user?.name ?? '当前用户',
+        actorRole: role ?? undefined,
+      }),
+    onError: (error) => {
+      message.error((error as Error).message);
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['storeGoal', saved.storeId], saved);
+      queryClient.invalidateQueries({ queryKey: ['guardChanges', saved.storeId] });
+      queryClient.invalidateQueries({ queryKey: ['guardHealth', saved.storeId] });
+      queryClient.invalidateQueries({ queryKey: ['goalPace', saved.storeId] });
+      queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      message.success(t('goal.guardReverted'));
+      orchestratorApi
+        .generateCycle(saved.storeId)
+        .then((cycle) => {
+          queryClient.setQueryData(['operatingCycle', saved.storeId], cycle);
+          queryClient.invalidateQueries({ queryKey: ['guardHealth', saved.storeId] });
+        })
+        .catch(() => undefined);
+    },
+  });
+
+  /**
    * P29.1：Agent 给出建议，人只决定采不采。
    * 提议失败（无基线/非 GMV 目标）时明确告知，不用假数字兜底。
    */
@@ -568,14 +600,40 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
         onCancel={() => setHistoryOpen(false)}
       >
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          {guardChanges.map((change) => (
-            <div key={change.id}>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {dayjs(change.at).format('YYYY-MM-DD HH:mm')} · {change.actor}
-              </Typography.Text>
-              <Typography.Paragraph style={{ marginBottom: 0 }}>{change.summary}</Typography.Paragraph>
-            </div>
-          ))}
+          {guardChanges.map((change) => {
+            const guardChange = change.guardChanges?.[0];
+            // P45.1：只有「这条变更的值现在仍然生效」才允许撤销，否则会覆盖后来的人为调整。
+            const stillEffective = Boolean(
+              guardChange && goal && goal.constraints[guardChange.field] === guardChange.to,
+            );
+            return (
+              <div key={change.id}>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {dayjs(change.at).format('YYYY-MM-DD HH:mm')} · {change.actor}
+                </Typography.Text>
+                <Typography.Paragraph style={{ marginBottom: 0 }}>
+                  {change.summary}
+                  {canEdit && guardChange && goal && (
+                    stillEffective ? (
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ paddingInline: 6, height: 20 }}
+                        loading={revertMutation.isPending}
+                        onClick={() => revertMutation.mutate(change.id)}
+                      >
+                        {t('goal.guardRevert', { value: formatGuardValue(guardChange.field, guardChange.from) })}
+                      </Button>
+                    ) : (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {t('goal.guardRevertStale')}
+                      </Typography.Text>
+                    )
+                  )}
+                </Typography.Paragraph>
+              </div>
+            );
+          })}
         </Space>
       </Modal>
 

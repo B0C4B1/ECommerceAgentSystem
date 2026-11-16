@@ -563,6 +563,10 @@ export const operatingModelApi = {
           summary: `${change.label} ${change.from} → ${change.to}；原因：${reason}`,
           category: 'human_ops',
           linkTo: `/dashboard?storeId=${storeId}`,
+          // P45.1：摘要给人读，原值留给「撤销回到变更前」。
+          guardChanges: [
+            { field: change.field, from: goal.constraints[change.field], to: next.constraints[change.field] },
+          ],
         });
       });
     }
@@ -585,6 +589,38 @@ export const operatingModelApi = {
       });
     }
     return mockDelay(next);
+  },
+
+  /**
+   * P45.1：护栏改错的回滚。只允许撤销「当前仍在生效」的那条变更——
+   * 同一字段此后又被改过时直接拒绝，避免撤销把人后来的调整一起覆盖。
+   * 撤销本身仍走 saveGoal，因此照常带上原因、确认人，并写进同一条审计流水。
+   */
+  revertGuardChange: (
+    storeId: AllMallId,
+    auditLogId: AllMallId | string,
+    meta: { actor: string; actorRole?: string },
+  ) => {
+    const log = getAuditLogs().find(
+      (item) => item.id === auditLogId && item.storeId === storeId && item.action === '变更护栏',
+    );
+    const change = log?.guardChanges?.[0];
+    if (!log || !change) {
+      throw new Error('这条记录没有留下护栏原值，无法撤销');
+    }
+    const goal = goals.find((g) => g.storeId === storeId) ?? defaultGoal(storeId);
+    if (goal.constraints[change.field] !== change.to) {
+      throw new Error('这条护栏此后又被改过，撤销会覆盖后续变更');
+    }
+    const field = GUARD_FIELDS.find((item) => item.key === change.field);
+    const label = field?.label ?? change.field;
+    const previous = field ? field.format(change.from) : String(change.from);
+    const reason = `撤销 ${dayjs(log.at).format('MM-DD HH:mm')} 的变更（${label} 回到 ${previous}）`;
+    return operatingModelApi.saveGoal(
+      storeId,
+      { constraints: { ...goal.constraints, [change.field]: change.from } },
+      { ...meta, reason },
+    );
   },
 
   /**

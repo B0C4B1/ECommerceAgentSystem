@@ -105,6 +105,13 @@ export interface Approval {
 
 export type AuditCategory = 'approval' | 'agent_action' | 'human_ops' | 'system_event' | 'store_session' | 'task' | 'agent' | 'exception' | 'store';
 
+/** P45.1：护栏变更的结构化原值——摘要给人读，这里留给「撤销回到变更前」用。 */
+export interface AuditGuardChange {
+  field: 'minGrossMargin' | 'maxDiscountPct' | 'monthlyBudgetCap';
+  from: number;
+  to: number;
+}
+
 export interface AuditLog {
   id: AllMallId;
   actor: string;
@@ -117,6 +124,8 @@ export interface AuditLog {
   linkTo?: string;
   /** 可归因到店铺的操作带上店铺 id，审计页才能按店筛选；系统级事件为空。 */
   storeId?: AllMallId;
+  /** P45.1：只有护栏变更带这项；没有它（历史记录）就不提供撤销，不猜旧值。 */
+  guardChanges?: AuditGuardChange[];
 }
 
 export interface Member {

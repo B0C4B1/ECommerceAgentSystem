@@ -44,6 +44,8 @@ export function recordAuditLog(input: {
   category: AuditLog['category'];
   linkTo?: string;
   storeId?: AllMallId;
+  /** P45.1：护栏变更把旧值/新值以数字留下，界面才能「回到变更前」。 */
+  guardChanges?: AuditLog['guardChanges'];
 }): void {
   if (!auditLogsRef) {
     console.warn('[auditLogger] Not initialized — skipping audit log:', input.summary);
@@ -61,6 +63,7 @@ export function recordAuditLog(input: {
     category: input.category,
     linkTo: input.linkTo,
     storeId: input.storeId,
+    guardChanges: input.guardChanges,
   };
 
   auditLogsRef.push(entry);
