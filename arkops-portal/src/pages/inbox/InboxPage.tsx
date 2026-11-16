@@ -1950,6 +1950,15 @@ export function InboxPage() {
                             </Tag>
                           )}
                           {entry.approval && <StatusBadge value={entry.approval.riskLevel} />}
+                          {entry.approval?.timeoutEscalatedAt && (
+                            <Tag
+                              color="red"
+                              style={{ margin: 0 }}
+                              title={t('inbox.approvalEscalatedHint')}
+                            >
+                              {t('inbox.approvalEscalatedTag')}
+                            </Tag>
+                          )}
                         {entry.approval && (() => {
                           const policy = approvalPolicies.find((p) => p.riskLevel === entry.approval!.riskLevel);
                           // An item sitting in the approval queue while its policy says

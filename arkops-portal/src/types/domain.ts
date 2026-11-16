@@ -101,6 +101,8 @@ export interface Approval {
   priorApprovals?: PriorApprovalRecord[];
   /** 创建时由店铺策略解析出的审批要求；历史数据缺失时按当前策略实时解析 */
   requirement?: ApprovalRequirement;
+  /** P51：高风险审批超时未决时，Agent 已将其升级给管理员的时间（只记一次） */
+  timeoutEscalatedAt?: string;
 }
 
 export type AuditCategory = 'approval' | 'agent_action' | 'human_ops' | 'system_event' | 'store_session' | 'task' | 'agent' | 'exception' | 'store';

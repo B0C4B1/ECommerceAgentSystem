@@ -4,6 +4,7 @@ import { insertFirst, replaceItem } from './mockRepository';
 import { recordAuditLog } from './auditLogger';
 import { registerMockState } from './mockPersistence';
 import { resolveApprovalRequirement } from './operatingModel';
+import { getPolicyForRisk } from './approvalPolicies';
 import { outcomesApi } from './outcomes';
 import type {
   AgentType,
@@ -20,6 +21,8 @@ import type {
 } from '../types/domain';
 
 const CURRENT_ACTOR = '当前用户';
+/** P51：超时收尾的审计与决策人统一记为 Agent，方便人区分「谁关掉的」。 */
+const TIMEOUT_ACTOR = 'Agent（审批超时）';
 
 /** WS-B (B3): attach structured before/after evidence and dual-approval progress. */
 function withEvidence(approval: Approval): Approval {
@@ -50,10 +53,15 @@ export interface ApprovalDecisionResult {
   outcome?: GoalOutcome;
 }
 
-function recordDecisionAudit(approval: Approval, action: string, summary: string): void {
+function recordDecisionAudit(
+  approval: Approval,
+  action: string,
+  summary: string,
+  actor: string = CURRENT_ACTOR,
+): void {
   const auditLog: AuditLog = {
     id: 6000 + auditLogs.length + 1,
-    actor: CURRENT_ACTOR,
+    actor,
     action,
     entity: '审批',
     entityId: approval.id,
@@ -86,9 +94,70 @@ function syncTaskAfterDecision(approval: Approval, status: 'approved' | 'rejecte
   }));
 }
 
+/**
+ * P51：审批时限必须真的执行，否则「到期未处理将……」只是一句文案。
+ * 在读取列表/详情和治理巡检时调用；幂等，只处理已过策略时限的待审批单。
+ * - auto_reject：关闭为「已过期」，任务取消、挂账作废；
+ * - auto_approve：遗留的低风险单按策略自动通过并回写效果；
+ * - escalate：保留待办，只记一次「已升级给管理员」，仍由人做最终决策。
+ */
+export function expireDueApprovals(now: Date = new Date()): number {
+  let changed = 0;
+  const nowMs = now.getTime();
+  for (const current of [...approvals]) {
+    if (current.status !== 'pending') continue;
+    const policy = getPolicyForRisk(current.riskLevel);
+    if (!policy) continue;
+    const deadlineMs = new Date(current.requestedAt).getTime() + policy.timeoutHours * 60 * 60 * 1000;
+    if (nowMs < deadlineMs) continue;
+
+    if (policy.timeoutAction === 'escalate') {
+      if (current.timeoutEscalatedAt) continue;
+      const escalated = replaceItem(approvals, (item) => item.id === current.id, (item) => ({
+        ...withEvidence(item),
+        timeoutEscalatedAt: now.toISOString(),
+      }));
+      if (!escalated) continue;
+      recordDecisionAudit(
+        escalated,
+        '审批超时升级',
+        `${escalated.title} - 超过 ${policy.timeoutHours} 小时未处理，已升级给管理员，仍待决策`,
+        TIMEOUT_ACTOR,
+      );
+      changed += 1;
+      continue;
+    }
+
+    const approved = policy.timeoutAction === 'auto_approve';
+    const updated = replaceItem(approvals, (item) => item.id === current.id, (item) => ({
+      ...withEvidence(item),
+      status: (approved ? 'approved' : 'expired') as ApprovalStatus,
+      decidedAt: now.toISOString(),
+      decidedBy: TIMEOUT_ACTOR,
+      decisionNote: `超过 ${policy.timeoutHours} 小时未处理，按审批策略自动${approved ? '通过' : '驳回'}`,
+    }));
+    if (!updated) continue;
+    syncTaskAfterDecision(updated, approved ? 'approved' : 'rejected');
+    if (approved) outcomesApi.realizeByApproval(updated.id);
+    else outcomesApi.discardByApproval(updated.id);
+    recordDecisionAudit(
+      updated,
+      approved ? '审批超时自动通过' : '审批超时自动驳回',
+      `${updated.title} - 超过 ${policy.timeoutHours} 小时未处理，按策略自动${approved ? '通过' : '驳回'}`,
+      TIMEOUT_ACTOR,
+    );
+    changed += 1;
+  }
+  return changed;
+}
+
 export const approvalsApi = {
-  list: () => mockDelay(approvals.map(withEvidence)),
+  list: () => {
+    expireDueApprovals();
+    return mockDelay(approvals.map(withEvidence));
+  },
   get: (approvalId: AllMallId) => {
+    expireDueApprovals();
     const approval = approvals.find((item) => item.id === approvalId);
     return mockDelay(approval ? withEvidence(approval) : undefined);
   },
@@ -180,6 +249,13 @@ export const approvalsApi = {
     if (!current) return mockDelay(undefined);
     // 已通过 / 已拒绝的审批单不可再次决策，避免双标签页重复写入结果与审计。
     if (current.status !== 'pending') return mockDelay(undefined);
+    // P51：超过时限且策略要求自动收尾的单子，先在旧标签页提交也不能绕过 Agent 的时限。
+    const policy = getPolicyForRisk(current.riskLevel);
+    const deadlineMs = new Date(current.requestedAt).getTime() + (policy?.timeoutHours ?? 0) * 60 * 60 * 1000;
+    if (policy && policy.timeoutAction !== 'escalate' && Date.now() >= deadlineMs) {
+      expireDueApprovals();
+      return mockDelay(undefined);
+    }
 
     const enriched = withEvidence(current);
     // 已落库的 requirement 优先，避免调整自主等级后追溯改变历史审批的单/双人要求。

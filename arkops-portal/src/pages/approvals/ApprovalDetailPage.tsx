@@ -171,7 +171,7 @@ export function ApprovalDetailPage() {
       />
 
       {/* B4: expiry countdown + timeout consequence */}
-      {isPending && urgency && (
+      {isPending && urgency && !approval.timeoutEscalatedAt && (
         <Alert
           showIcon
           icon={<ClockCircleOutlined />}
@@ -186,6 +186,19 @@ export function ApprovalDetailPage() {
               </Typography.Text>
             </Space>
           }
+        />
+      )}
+
+      {/* P51：高风险超时后 Agent 已升级，时限提示要说明「已经发生了什么」而不是继续倒计时。 */}
+      {isPending && approval.timeoutEscalatedAt && (
+        <Alert
+          showIcon
+          type="error"
+          icon={<ClockCircleOutlined />}
+          message={t('approvalDetail.timeoutEscalatedTitle')}
+          description={t('approvalDetail.timeoutEscalatedDescription', {
+            time: dayjs(approval.timeoutEscalatedAt).format('MM-DD HH:mm'),
+          })}
         />
       )}
 

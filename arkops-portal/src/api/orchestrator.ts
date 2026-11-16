@@ -12,7 +12,7 @@ import dayjs from 'dayjs';
 import { mockDelay } from './client';
 import { agentsApi } from './agents';
 import { agentProfilesApi, AGENT_TYPE_DOMAIN, isSpecialized, SPECIALIZED_BOOST } from './agentProfiles';
-import { approvalsApi, type ApprovalCreateResult } from './approvals';
+import { approvalsApi, expireDueApprovals, type ApprovalCreateResult } from './approvals';
 import { exceptionsApi, type ExceptionItem } from './exceptions';
 import { inventoryApi } from './inventory';
 import { stores } from './mockData';
@@ -741,6 +741,8 @@ export interface GovernanceSweepResult {
   guardExpiryCleared: number;
   /** P49：账户上期结算待办有新建或自动收口（0/1）。 */
   accountChanged: number;
+  /** P51：超过审批时限后由 Agent 按策略收尾/升级的单数。 */
+  approvalTimedOut: number;
   /** 是否有任何变化（false 时不打扰人）。 */
   changed: boolean;
 }
@@ -3052,6 +3054,8 @@ export const orchestratorApi = {
     // 全局收尾：人的决策规则优先，其次超时默认；两者都只处理已到期/已可判定的条目。
     const ruleApplied = await orchestratorApi.applyDecisionRules();
     const expiredApplied = await orchestratorApi.applyExpiredDecisionDefaults();
+    // P51：审批时限也由 Agent 收尾，不再只显示「已到期」却继续让人点通过/拒绝。
+    const approvalTimedOut = expireDueApprovals();
     const changed =
       settled +
         paceChanged +
@@ -3059,6 +3063,7 @@ export const orchestratorApi = {
         accountChanged +
         ruleApplied +
         expiredApplied +
+        approvalTimedOut +
         guardRestored +
         guardExpiryCleared >
       0;
@@ -3072,6 +3077,7 @@ export const orchestratorApi = {
       guardRestored,
       guardExpiryCleared,
       accountChanged,
+      approvalTimedOut,
       changed,
     };
   },
