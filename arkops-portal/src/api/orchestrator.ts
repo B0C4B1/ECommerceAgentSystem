@@ -3049,7 +3049,7 @@ export const orchestratorApi = {
     guardChanged = guard.changedStores;
     // P49：账户上期结论不再只挂在账户目标行；巡检把「上期事实 + 沿用 / 下调」推进待办，
     // 本月已重新确认时自动收口，人不进工作台也能在收件箱看到该表态的事。
-    const account = await operatingModelApi.syncAccountGoalSettlementEscalation(ids);
+    const account = await operatingModelApi.syncAccountGoalSettlementEscalation();
     const accountChanged = account.escalated || account.closed > 0 ? 1 : 0;
     // 全局收尾：人的决策规则优先，其次超时默认；两者都只处理已到期/已可判定的条目。
     const ruleApplied = await orchestratorApi.applyDecisionRules();

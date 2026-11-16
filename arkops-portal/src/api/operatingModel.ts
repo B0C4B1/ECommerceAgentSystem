@@ -707,15 +707,18 @@ export interface AccountGoalReview {
 /**
  * P48.1：只有「账户目标不属于本月」时才复盘上期——本月已确认说明人已经表过态，
  * 再把上期数字摆回来只会制造第二套口径。没有可用经营基线就返回 null，不编达成率。
+ *
+ * P52.1：账户口径固定为「账户下全部店铺」，不接受调用方传入范围。
+ * 同一笔上期账户实际，不能因为巡检只带已连接店铺、分配方案只带 GMV 店铺，
+ * 就在收件箱与账户目标行显示两个数；调用方只负责触发，不负责定义账户边界。
  */
-function buildAccountGoalReview(storeIds: AllMallId[]): AccountGoalReview | null {
+function buildAccountGoalReview(): AccountGoalReview | null {
   if (!accountGoal || accountGoal.target <= 0) return null;
   const nowKey = currentPeriodKey();
   if (dayjs(accountGoal.updatedAt).format('YYYY-MM') >= nowKey) return null;
 
-  const baselines = storeIds
-    .map((storeId) => stores.find((store) => store.id === storeId))
-    .map((store) => (store ? getStoreOperatingBaseline(store.name) : null))
+  const baselines = stores
+    .map((store) => getStoreOperatingBaseline(store.name))
     .filter((baseline): baseline is NonNullable<typeof baseline> => Boolean(baseline));
   if (baselines.length === 0) return null;
 
@@ -729,7 +732,7 @@ function buildAccountGoalReview(storeIds: AllMallId[]): AccountGoalReview | null
     shortfall: Math.max(0, accountGoal.target - actualGmv),
     verdict: achievedPct >= 1 ? 'achieved' : 'missed',
     coveredStores: baselines.length,
-    storeCount: storeIds.length,
+    storeCount: stores.length,
   };
 }
 
@@ -1566,17 +1569,18 @@ export const operatingModelApi = {
    * P48.1 只读：跨月未确认时，Agent 先把上期账户承诺与实际算清楚，
    * 让「重新确认」建立在事实之上，而不是让人自己逐店加总。
    */
-  getAccountGoalReview: (storeIds: AllMallId[]) => mockDelay(buildAccountGoalReview(storeIds)),
+  getAccountGoalReview: () => mockDelay(buildAccountGoalReview()),
 
   /**
    * P49：账户上期的结论不能只停在账户目标行——人不点开工作台就永远不知道上期做成什么样，
    * 也无法在收件箱里表态。只要账户目标还停在上期，Agent 就把「上期事实 + 沿用 / 下调」
    * 推进待办；本月重新确认后，未处理的旧条目自动收口。
    */
-  syncAccountGoalSettlementEscalation: async (
-    storeIds: AllMallId[],
-  ): Promise<{ escalated: boolean; closed: number }> => {
-    const review = accountGoal ? buildAccountGoalReview(storeIds) : null;
+  syncAccountGoalSettlementEscalation: async (): Promise<{
+    escalated: boolean;
+    closed: number;
+  }> => {
+    const review = accountGoal ? buildAccountGoalReview() : null;
     const openItems = (await exceptionsApi.list()).filter(
       (item) => item.type === 'account_goal_settlement' && !item.resolved && !item.ignored,
     );
@@ -1615,8 +1619,8 @@ export const operatingModelApi = {
       title: `账户上期${achieved ? '已达成' : '未达成'} · ${pctText}`,
       summary: `上期（${review.periodKey}）账户目标 ${formatCny(review.target)} · 各店实际合计 ${formatCny(
         review.actualGmv,
-      )}（${pctText}）${gapText}；账户目标仍停在上期，本月承诺还需你确认一次。`,
-      detail: `实际只汇总 ${review.coveredStores}/${review.storeCount} 家有经营基线的店铺；沿用不改数字，下调按上期实际取整到千元。两者都只改账户目标，不重写各店目标，也不动护栏。`,
+      )}（覆盖 ${review.coveredStores}/${review.storeCount} 家店，${pctText}）${gapText}；账户目标仍停在上期，本月承诺还需你确认一次。`,
+      detail: `实际按 ${review.coveredStores}/${review.storeCount} 家有经营基线的店铺汇总；沿用不改数字，下调按上期实际取整到千元。两者都只改账户目标，不重写各店目标，也不动护栏。`,
       suggestedAction: canLower
         ? '在收件箱选择「沿用上期目标」或「按上期实际下调」；不处理时超时按沿用收尾。'
         : '在收件箱确认沿用上期目标；不处理时超时按沿用收尾。',
@@ -1679,8 +1683,7 @@ export const operatingModelApi = {
     optionId: 'uphold' | 'override',
     meta: { actor: string; exceptionId: string; note?: string },
   ) => {
-    const storeIds = stores.filter((store) => store.status === 'connected').map((store) => store.id);
-    const review = accountGoal ? buildAccountGoalReview(storeIds) : null;
+    const review = accountGoal ? buildAccountGoalReview() : null;
     const actor = meta.actor.trim() || '当前用户';
     const note = meta.note?.trim();
     const linkTo = '/dashboard#portfolio-goals-card';
@@ -1845,7 +1848,7 @@ export const operatingModelApi = {
 
     // P48.1：若这次确认覆盖的是上期承诺，把上期复盘一并留在账户级审计里，
     // 人半年后回看「当初为什么改这个数」时有事实可查。
-    const review = buildAccountGoalReview(allocation.rows.map((row) => row.storeId));
+    const review = buildAccountGoalReview();
 
     accountGoal = {
       metric: 'gmv',

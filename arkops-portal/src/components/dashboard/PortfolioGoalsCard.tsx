@@ -94,9 +94,9 @@ function AccountGoalSection({
 
   /** P48.1：跨月未确认时，Agent 先把上期承诺与实际算清楚，人再决定沿用还是调整。 */
   const { data: review } = useQuery({
-    queryKey: ['accountGoalReview', storeIds, accountGoal?.updatedAt],
-    queryFn: () => operatingModelApi.getAccountGoalReview(storeIds),
-    enabled: storeIds.length > 0 && Boolean(accountGoal) && !isCurrent,
+    queryKey: ['accountGoalReview', accountGoal?.updatedAt],
+    queryFn: () => operatingModelApi.getAccountGoalReview(),
+    enabled: Boolean(accountGoal) && !isCurrent,
   });
 
   /** 预演：只算不写；人确认后才落库。 */
