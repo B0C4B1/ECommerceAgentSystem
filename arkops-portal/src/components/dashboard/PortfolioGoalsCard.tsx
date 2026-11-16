@@ -19,6 +19,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Progress,
   Row,
   Col,
@@ -325,6 +326,34 @@ function BudgetPoolSection({ storeIds }: { storeIds: AllMallId[] }) {
     enabled: storeIds.length > 1,
   });
 
+  const { data: lastRevert } = useQuery({
+    queryKey: ['budgetRevert', storeIds],
+    queryFn: () => operatingModelApi.getLastBudgetReallocation(),
+    enabled: storeIds.length > 1,
+  });
+
+  const revert = useMutation({
+    mutationFn: () =>
+      operatingModelApi.revertBudgetReallocation({
+        actor: user?.name ?? '当前用户',
+        actorRole: role ?? undefined,
+      }),
+    onError: (error) => message.error((error as Error).message),
+    onSuccess: () => {
+      [
+        'storeGoal',
+        'portfolio',
+        'guardHealth',
+        'accountGuards',
+        'crossStoreArbitration',
+        'audit-logs',
+        'budgetPool',
+        'budgetRevert',
+      ].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
+      message.success(t('budgetPool.reverted'));
+    },
+  });
+
   const apply = useMutation({
     mutationFn: () =>
       operatingModelApi.reallocateAdBudget(storeIds, {
@@ -341,6 +370,7 @@ function BudgetPoolSection({ storeIds }: { storeIds: AllMallId[] }) {
         'crossStoreArbitration',
         'audit-logs',
         'budgetPool',
+        'budgetRevert',
       ].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
       setOpen(false);
       message.success(t('budgetPool.saved', { count: String(result.moves.length) }));
@@ -399,6 +429,38 @@ function BudgetPoolSection({ storeIds }: { storeIds: AllMallId[] }) {
               })
             : t('budgetPool.summaryBalanced', { pool: formatMoney(proposal.accountAdTotal) })}
       </Typography.Text>
+      {lastRevert && lastRevert.rows.length > 0 && (
+        <Space size={8} wrap style={{ marginTop: 4 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('budgetPool.lastReallocation', {
+              time: dayjs(lastRevert.at).format('MM-DD HH:mm'),
+              actor: lastRevert.actor,
+              count: String(lastRevert.rows.length),
+            })}
+          </Typography.Text>
+          {canEdit && (
+            <Popconfirm
+              title={t('budgetPool.revertConfirm', { count: String(lastRevert.rows.length) })}
+              okText={t('budgetPool.revert')}
+              cancelText={t('common.cancel')}
+              disabled={!lastRevert.reversible}
+              onConfirm={() => revert.mutate()}
+            >
+              <Button
+                size="small"
+                type="link"
+                danger
+                disabled={!lastRevert.reversible}
+                loading={revert.isPending}
+              >
+                {lastRevert.reversible
+                  ? t('budgetPool.revert')
+                  : t('budgetPool.revertBlocked')}
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      )}
 
       <Modal
         open={open}

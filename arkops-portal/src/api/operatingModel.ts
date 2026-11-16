@@ -352,6 +352,26 @@ export interface BudgetPoolProposal {
   moves: Array<{ fromStoreId: AllMallId; toStoreId: AllMallId; amount: number }>;
 }
 
+export interface BudgetReallocationStore {
+  storeId: AllMallId;
+  storeName: string;
+  from: number;
+  to: number;
+  current: number;
+  /** 当前预算池仍等于该次写入的新值。 */
+  unchanged: boolean;
+}
+
+/** P46.3：最近一次预算池再分配，供界面提示「上次挪了什么、能不能整批撤销」。 */
+export interface BudgetReallocationRecord {
+  batchId: string;
+  at: string;
+  actor: string;
+  rows: BudgetReallocationStore[];
+  /** 所有店当前预算池仍等于该次新值时，才允许整批撤销。 */
+  reversible: boolean;
+}
+
 /** 太小的钱挪来挪去只会制造噪音，也不值得人确认一次。 */
 const BUDGET_MOVE_MIN = 100;
 
@@ -441,6 +461,47 @@ function buildBudgetPoolProposal(storeIds: AllMallId[]): BudgetPoolProposal {
       rows.reduce((sum, row) => sum + (row.roas ? row.take * row.roas : 0), 0),
     ),
     moves,
+  };
+}
+
+/** 最近一次仍未被撤销的预算池再分配；更早的批次已经是历史，不再提供撤销。 */
+function getBudgetReallocationRecord(): BudgetReallocationRecord | null {
+  const logs = getAuditLogs();
+  const latest = logs
+    .filter((log) => log.action === '调整广告预算池' && log.budgetChange)
+    .sort((a, b) => b.at.localeCompare(a.at))[0];
+  if (!latest?.budgetChange) return null;
+  const batchId = latest.budgetChange.batchId;
+  const reverted = logs.some(
+    (log) => log.action === '撤销预算池再分配' && log.budgetChange?.batchId === batchId,
+  );
+  if (reverted) return null;
+  const batch = logs.filter(
+    (log) =>
+      log.action === '调整广告预算池' &&
+      log.budgetChange?.batchId === batchId &&
+      typeof log.storeId === 'number',
+  );
+  const rows: BudgetReallocationStore[] = batch.map((log) => {
+    const change = log.budgetChange!;
+    const storeId = log.storeId as AllMallId;
+    const policy = policies.find((p) => p.storeId === storeId);
+    const current = policy?.budgetPool ?? DEFAULT_BUDGET_POOL;
+    return {
+      storeId,
+      storeName: stores.find((s) => s.id === storeId)?.name ?? `#${storeId}`,
+      from: change.from,
+      to: change.to,
+      current: current.adMonthly,
+      unchanged: Math.abs(current.adMonthly - change.to) < 0.5,
+    };
+  });
+  return {
+    batchId,
+    at: latest.at,
+    actor: latest.actor,
+    rows,
+    reversible: rows.length > 0 && rows.every((row) => row.unchanged),
   };
 }
 
@@ -783,6 +844,7 @@ export const operatingModelApi = {
       throw new Error('再分配前后账户广告预算池必须一致');
     }
     const at = dayjs().format('MM-DD HH:mm');
+    const batchId = `budget-${Date.now()}`;
     const actor = `${meta.actor.trim() || '当前用户'}${meta.actorRole ? `（${meta.actorRole}）` : ''}`;
     proposal.rows
       .filter((row) => row.give > 0 || row.take > 0)
@@ -807,9 +869,54 @@ export const operatingModelApi = {
           summary: `广告月预算池 ¥${row.adPoolMonthly} → ¥${row.nextAdPool}（${move}，账户再分配 ${at}）`,
           category: 'human_ops',
           linkTo: `/dashboard?storeId=${row.storeId}`,
+          budgetChange: { batchId, from: row.adPoolMonthly, to: row.nextAdPool },
         });
       });
     return mockDelay(proposal);
+  },
+
+  /**
+   * P46.3：最近一次预算池再分配；界面用它提示「上次挪了什么」，并判断能否整批撤销。
+   */
+  getLastBudgetReallocation: () => mockDelay(getBudgetReallocationRecord()),
+
+  /**
+   * P46.3：把最近一次再分配整批恢复到变更前。只要有一家店在此之后又被改过就拒绝，
+   * 不拿旧批次覆盖新的调整；撤销本身按店写审计，仍可追溯。
+   */
+  revertBudgetReallocation: (meta: { actor: string; actorRole?: string }) => {
+    const record = getBudgetReallocationRecord();
+    if (!record) throw new Error('没有可撤销的预算池再分配');
+    if (!record.reversible) throw new Error('预算池在此之后又被调整过，不能整批撤销');
+    const actor = `${meta.actor.trim() || '当前用户'}${meta.actorRole ? `（${meta.actorRole}）` : ''}`;
+    const at = dayjs(record.at).format('MM-DD HH:mm');
+    record.rows.forEach((row) => {
+      const index = policies.findIndex((p) => p.storeId === row.storeId);
+      const current = index >= 0 ? policies[index] : undefined;
+      const next: OperatingPolicy = {
+        storeId: row.storeId,
+        autonomy: current?.autonomy ?? operatingModelApi.getEffectivePolicy(row.storeId).autonomy,
+        budgetPool: {
+          adMonthly: row.from,
+          promoMonthly: current?.budgetPool.promoMonthly ?? DEFAULT_BUDGET_POOL.promoMonthly,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+      if (index >= 0) policies[index] = next;
+      else policies.push(next);
+      recordAuditLog({
+        actor,
+        action: '撤销预算池再分配',
+        entity: 'store',
+        entityId: row.storeId,
+        storeId: row.storeId,
+        summary: `广告月预算池 ¥${row.to} → ¥${row.from}（撤销 ${at} 的账户再分配）`,
+        category: 'human_ops',
+        linkTo: `/dashboard?storeId=${row.storeId}`,
+        budgetChange: { batchId: record.batchId, from: row.to, to: row.from },
+      });
+    });
+    return mockDelay(getBudgetReallocationRecord());
   },
 
   /**

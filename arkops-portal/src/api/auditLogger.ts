@@ -46,6 +46,8 @@ export function recordAuditLog(input: {
   storeId?: AllMallId;
   /** P45.1：护栏变更把旧值/新值以数字留下，界面才能「回到变更前」。 */
   guardChanges?: AuditLog['guardChanges'];
+  /** P46.3：预算池再分配按批次留下旧值/新值，界面才能整批撤销。 */
+  budgetChange?: AuditLog['budgetChange'];
 }): void {
   if (!auditLogsRef) {
     console.warn('[auditLogger] Not initialized — skipping audit log:', input.summary);
@@ -64,6 +66,7 @@ export function recordAuditLog(input: {
     linkTo: input.linkTo,
     storeId: input.storeId,
     guardChanges: input.guardChanges,
+    budgetChange: input.budgetChange,
   };
 
   auditLogsRef.push(entry);

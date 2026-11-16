@@ -112,6 +112,13 @@ export interface AuditGuardChange {
   to: number;
 }
 
+/** P46.3：预算池再分配的结构化原值——按批次留下每家店的旧/新预算，支持整批撤销。 */
+export interface AuditBudgetChange {
+  batchId: string;
+  from: number;
+  to: number;
+}
+
 export interface AuditLog {
   id: AllMallId;
   actor: string;
@@ -126,6 +133,8 @@ export interface AuditLog {
   storeId?: AllMallId;
   /** P45.1：只有护栏变更带这项；没有它（历史记录）就不提供撤销，不猜旧值。 */
   guardChanges?: AuditGuardChange[];
+  /** P46.3：只有预算池再分配/撤销带这项，含批次与单店旧值 → 新值。 */
+  budgetChange?: AuditBudgetChange;
 }
 
 export interface Member {
