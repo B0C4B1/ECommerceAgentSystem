@@ -77,11 +77,25 @@ function AccountGoalSection({
     queryFn: () => operatingModelApi.getAccountGoal(),
   });
 
+  /**
+   * P44.1：账户目标只在「写下的那个月」算本月承诺。
+   * 账户目标没有独立周期字段，写入时刻即归属月份（adopt 只会写当月），
+   * 因此用 updatedAt 的月份判定，跨月后自动落回「上期 · 待确认」，不会把上月承诺当本月。
+   */
+  const isCurrent = Boolean(accountGoal && dayjs(accountGoal.updatedAt).isSame(dayjs(), 'month'));
+
   /** Agent 建议的账户目标：各店按当前节奏的月末预计之和，人可改可不改。 */
   const { data: suggestion } = useQuery({
     queryKey: ['accountGoalSuggestion', storeIds],
     queryFn: () => operatingModelApi.suggestAccountTarget(storeIds),
     enabled: storeIds.length > 0,
+  });
+
+  /** P48.1：跨月未确认时，Agent 先把上期承诺与实际算清楚，人再决定沿用还是调整。 */
+  const { data: review } = useQuery({
+    queryKey: ['accountGoalReview', storeIds, accountGoal?.updatedAt],
+    queryFn: () => operatingModelApi.getAccountGoalReview(storeIds),
+    enabled: storeIds.length > 0 && Boolean(accountGoal) && !isCurrent,
   });
 
   /** 预演：只算不写；人确认后才落库。 */
@@ -114,12 +128,6 @@ function AccountGoalSection({
 
   if (storeIds.length <= 1) return null;
 
-  /**
-   * P44.1：账户目标只在「写下的那个月」算本月承诺。
-   * 账户目标没有独立周期字段，写入时刻即归属月份（adopt 只会写当月），
-   * 因此用 updatedAt 的月份判定，跨月后自动落回「上期 · 待确认」，不会把上月承诺当本月。
-   */
-  const isCurrent = Boolean(accountGoal && dayjs(accountGoal.updatedAt).isSame(dayjs(), 'month'));
   const targetGap = accountGoal && isCurrent ? storeTargetSum - accountGoal.target : 0;
 
   return (
@@ -156,6 +164,31 @@ function AccountGoalSection({
               value: formatMoney(suggestion.target),
               covered: String(suggestion.coveredStores),
               total: String(suggestion.storeCount),
+            })}
+          </Typography.Text>
+        )}
+        {/* P48.1：上期的账先算清楚，人再决定本月承诺，不再盲拍。 */}
+        {!isCurrent && review && (
+          <Typography.Text
+            type={review.verdict === 'missed' ? 'warning' : 'success'}
+            style={{ fontSize: 12 }}
+          >
+            {review.verdict === 'missed'
+              ? t('accountGoal.reviewMissed', {
+                  period: review.periodKey,
+                  actual: formatMoney(review.actualGmv),
+                  pct: `${Math.round(review.achievedPct * 100)}%`,
+                  shortfall: formatMoney(review.shortfall),
+                })
+              : t('accountGoal.reviewAchieved', {
+                  period: review.periodKey,
+                  actual: formatMoney(review.actualGmv),
+                  pct: `${Math.round(review.achievedPct * 100)}%`,
+                })}
+            {' · '}
+            {t('accountGoal.reviewCoverage', {
+              covered: String(review.coveredStores),
+              total: String(review.storeCount),
             })}
           </Typography.Text>
         )}
@@ -229,6 +262,20 @@ function AccountGoalSection({
               </Typography.Text>
             )}
           </div>
+          {/* P48.1：先把上期事实摆在人眼前，再让人填本月承诺。 */}
+          {!isCurrent && review && (
+            <Alert
+              type={review.verdict === 'missed' ? 'warning' : 'success'}
+              showIcon
+              message={t('accountGoal.reviewAlert', {
+                period: review.periodKey,
+                target: formatMoney(review.target),
+                actual: formatMoney(review.actualGmv),
+                pct: `${Math.round(review.achievedPct * 100)}%`,
+              })}
+              description={t('accountGoal.reviewBasis')}
+            />
+          )}
           <Alert type="info" showIcon message={t('accountGoal.basis')} />
           {allocation && allocation.overCapacityCount > 0 && (
             <Alert

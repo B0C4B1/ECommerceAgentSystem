@@ -680,6 +680,54 @@ export function allocateAccountTarget(basis: AccountAllocationRow[], target: num
   };
 }
 
+/**
+ * P48.1 账户目标的上期复盘：只回答「上期承诺做成了什么样」，不改目标。
+ * 与单店结算同口径——只取上一个自然月整月 GMV，更早月份不推断。
+ */
+export interface AccountGoalReview {
+  /** 被复盘的自然月（YYYY-MM）。 */
+  periodKey: string;
+  /** 该月仍在行的账户承诺（账户目标被新目标替换前一直有效）。 */
+  target: number;
+  /** 有经营基线店铺的上期整月 GMV 合计。 */
+  actualGmv: number;
+  achievedPct: number;
+  /** 缺口；已达成时为 0。 */
+  shortfall: number;
+  verdict: 'achieved' | 'missed';
+  coveredStores: number;
+  storeCount: number;
+}
+
+/**
+ * P48.1：只有「账户目标不属于本月」时才复盘上期——本月已确认说明人已经表过态，
+ * 再把上期数字摆回来只会制造第二套口径。没有可用经营基线就返回 null，不编达成率。
+ */
+function buildAccountGoalReview(storeIds: AllMallId[]): AccountGoalReview | null {
+  if (!accountGoal || accountGoal.target <= 0) return null;
+  const nowKey = currentPeriodKey();
+  if (dayjs(accountGoal.updatedAt).format('YYYY-MM') >= nowKey) return null;
+
+  const baselines = storeIds
+    .map((storeId) => stores.find((store) => store.id === storeId))
+    .map((store) => (store ? getStoreOperatingBaseline(store.name) : null))
+    .filter((baseline): baseline is NonNullable<typeof baseline> => Boolean(baseline));
+  if (baselines.length === 0) return null;
+
+  const actualGmv = baselines.reduce((sum, baseline) => sum + baseline.previousMonthGmv, 0);
+  const achievedPct = actualGmv / accountGoal.target;
+  return {
+    periodKey: dayjs().subtract(1, 'month').format('YYYY-MM'),
+    target: accountGoal.target,
+    actualGmv,
+    achievedPct,
+    shortfall: Math.max(0, accountGoal.target - actualGmv),
+    verdict: achievedPct >= 1 ? 'achieved' : 'missed',
+    coveredStores: baselines.length,
+    storeCount: storeIds.length,
+  };
+}
+
 /** 审批策略解析结果，供三元表达式之外的调用方直接使用。 */
 export function resolveApprovalRequirement(
   storeId: AllMallId,
@@ -1510,6 +1558,12 @@ export const operatingModelApi = {
   getAccountGoal: () => mockDelay(accountGoal ? { ...accountGoal } : null),
 
   /**
+   * P48.1 只读：跨月未确认时，Agent 先把上期账户承诺与实际算清楚，
+   * 让「重新确认」建立在事实之上，而不是让人自己逐店加总。
+   */
+  getAccountGoalReview: (storeIds: AllMallId[]) => mockDelay(buildAccountGoalReview(storeIds)),
+
+  /**
    * 演示：把账户目标退回上一个自然月，复现「上期 · 待确认」。
    * 从未确认过账户目标时，用与 suggestAccountTarget 相同的基线口径补一条上期目标，
    * 保证刷新/重置后仍能走到这个状态；不写审计，因为它不是 Agent 或人的经营动作。
@@ -1604,6 +1658,10 @@ export const operatingModelApi = {
       });
     });
 
+    // P48.1：若这次确认覆盖的是上期承诺，把上期复盘一并留在账户级审计里，
+    // 人半年后回看「当初为什么改这个数」时有事实可查。
+    const review = buildAccountGoalReview(allocation.rows.map((row) => row.storeId));
+
     accountGoal = {
       metric: 'gmv',
       target: allocation.target,
@@ -1615,7 +1673,13 @@ export const operatingModelApi = {
       action: '设定账户目标',
       entity: 'account',
       entityId: 'account',
-      summary: `账户目标 ${formatCny(allocation.target)}，已分配到 ${covered.length}/${allocation.storeCount} 家店铺`,
+      summary: `账户目标 ${formatCny(allocation.target)}，已分配到 ${covered.length}/${allocation.storeCount} 家店铺${
+        review
+          ? `；上期（${review.periodKey}）承诺 ${formatCny(review.target)} · 实际 ${formatCny(
+              review.actualGmv,
+            )}（${Math.round(review.achievedPct * 100)}%）`
+          : ''
+      }`,
       category: 'human_ops',
       linkTo: '/dashboard',
     });
