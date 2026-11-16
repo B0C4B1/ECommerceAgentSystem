@@ -385,9 +385,33 @@ export function routePendingEscalations(): number {
   return routed;
 }
 
+/**
+ * P42：升级项的店铺归属必须与店铺主数据一致，否则这条数据会在四处说谎：
+ * 1. 种子只写 storeName、没写 storeId（ex_002/003/004/006）→ 收件箱把单店问题标成「账户级」，
+ *    切到任何店铺范围都还在，而超时策略、按店路由又拿不到它（applyExpiredDecisionDefaults 直接跳过）；
+ * 2. storeId 与 storeName 对不上（ex_008：storeName 拼多多、storeId 1002 淘宝）→
+ *    条目挂在 A 店的范围下，却写着 B 店的名字。
+ * 口径：storeId 是数据归属，storeName 只是展示。有 id 时用 id 纠正名字；
+ * 没 id 时只有店名唯一命中才补 id；两者都对不上就保持账户级，不猜。
+ */
+function normalizeExceptionStoreAttribution(): void {
+  for (const item of exceptionItems) {
+    if (item.storeId !== undefined) {
+      const matched = stores.find((store) => store.id === item.storeId);
+      // id 指向未知店铺时不动，交给后续人工核对，避免把归属改到别家。
+      if (matched && item.storeName !== matched.name) item.storeName = matched.name;
+      continue;
+    }
+    const byName = stores.filter((store) => store.name === item.storeName);
+    if (byName.length === 1) item.storeId = byName[0].id;
+  }
+}
+
 export const exceptionsApi = {
   // P30.5：读取前先让 Agent 把新出现的未指派升级项路由出去（幂等，不覆盖人的改派）。
+  // P42：先补齐店铺归属，再路由——否则缺 id 的单店条目会被当成账户级、路由与范围筛选都失效。
   list: (): Promise<ExceptionItem[]> => {
+    normalizeExceptionStoreAttribution();
     routePendingEscalations();
     return mockDelay([...exceptionItems]);
   },
