@@ -93,6 +93,16 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
     enabled: Boolean(storeId),
   });
 
+  /**
+   * P54：目标/护栏是本轮方案的输入。这里读当前方案，用来核对它是否已经按最新输入生成。
+   * 同一个 query key 与经营周期卡共享缓存，打开工作台不会多拉一次。
+   */
+  const { data: cycle } = useQuery({
+    queryKey: ['operatingCycle', storeId],
+    queryFn: () => orchestratorApi.getCycle(storeId!),
+    enabled: Boolean(storeId),
+  });
+
   /** P29.2 节奏预测：与目标提议同一套经营基线，回答「按当前速度哪天达成、差几天」。 */
   const { data: pace } = useQuery({
     queryKey: ['goalPace', storeId],
@@ -326,6 +336,54 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
   });
 
   /**
+   * P54：自动重跑失败时不再静默——人可以直接在这张卡上补跑一轮。
+   * 失败原因按既有口径区分「没有开启任何 Agent」，其余统一提示方案仍是旧的。
+   */
+  const replanMutation = useMutation({
+    mutationFn: () => orchestratorApi.generateCycle(storeId!),
+    onSuccess: (next) => {
+      queryClient.setQueryData(['operatingCycle', storeId], next);
+      queryClient.invalidateQueries({ queryKey: ['storeGoal', storeId] });
+      queryClient.invalidateQueries({ queryKey: ['guardHealth', storeId] });
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['approvals'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      message.success(t('goal.replanned'));
+    },
+    onError: (error: Error) => {
+      message.error(error.message === 'no_agent_enabled' ? t('cycle.noAgentEnabled') : t('goal.stale.failed'));
+    },
+  });
+
+  /**
+   * P54：本轮方案是否仍按旧输入生成。
+   * 判定只比对方案自己记录的输入快照（诊断目标/指标/优先级 + 采用的护栏），不看时间戳——
+   * 目标或护栏改过而 Agent 没重跑成功时，这一条会一直留在卡片上，刷新页面也不会消失。
+   */
+  const stalePlan = (() => {
+    if (!goal || !cycle?.generatedAt) return null;
+    const metricChanged = cycle.diagnosis.metric !== goal.metric;
+    const targetChanged = metricChanged || cycle.diagnosis.target !== goal.target;
+    const priorityChanged = cycle.diagnosis.priority !== goal.priority;
+    const guardChanged = Boolean(
+      cycle.guardSnapshot &&
+        (cycle.guardSnapshot.minGrossMargin !== goal.constraints.minGrossMargin ||
+          cycle.guardSnapshot.maxDiscountPct !== goal.constraints.maxDiscountPct ||
+          cycle.guardSnapshot.monthlyBudgetCap !== goal.constraints.monthlyBudgetCap),
+    );
+    if (!targetChanged && !priorityChanged && !guardChanged) return null;
+    return {
+      message:
+        targetChanged && !metricChanged
+          ? t('goal.stale.target', {
+              previous: formatGoalValue(goal.metric, cycle.diagnosis.target),
+              next: formatGoalValue(goal.metric, goal.target),
+            })
+          : t('goal.stale.inputs'),
+    };
+  })();
+
+  /**
    * P29.4 护栏影响预演：只在护栏真的被改动后拉取，打开弹窗不产生额外推演。
    * 预演只读，人可以反复调数看影响，再决定是否保存。
    */
@@ -495,6 +553,26 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
               }
             >
               {t('goal.scopeAllJump')}
+            </Button>
+          }
+        />
+      ) : null}
+      {/* P54：目标/护栏改过而 Agent 没按新输入重跑时，人在这里就能看见并补跑，不用自己去核对方案。 */}
+      {stalePlan ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={stalePlan.message}
+          description={t('goal.stale.hint')}
+          action={
+            <Button
+              size="small"
+              loading={replanMutation.isPending}
+              disabled={!canEdit}
+              onClick={() => replanMutation.mutate()}
+            >
+              {t('goal.stale.action')}
             </Button>
           }
         />

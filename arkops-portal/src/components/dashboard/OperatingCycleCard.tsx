@@ -262,6 +262,7 @@ export function OperatingCycleCard({
   });
 
   // P10 目标/护栏是否在本轮生成后被改过 — 改过就提示重新生成，避免旧结论继续生效。
+  // P54：目标本身也是本轮输入，不能只比护栏与优先级，否则人改了目标却看不到「方案已过期」。
   const { data: goal } = useQuery({
     queryKey: ['storeGoal', storeId],
     queryFn: () => operatingModelApi.getGoal(storeId!),
@@ -274,7 +275,10 @@ export function OperatingCycleCard({
         (cycle.guardSnapshot.minGrossMargin !== goal.constraints.minGrossMargin ||
           cycle.guardSnapshot.maxDiscountPct !== goal.constraints.maxDiscountPct ||
           cycle.guardSnapshot.monthlyBudgetCap !== goal.constraints.monthlyBudgetCap)) ||
-        (cycle?.diagnosis && cycle.diagnosis.priority !== goal.priority)),
+        (cycle?.diagnosis &&
+          (cycle.diagnosis.priority !== goal.priority ||
+            cycle.diagnosis.metric !== goal.metric ||
+            cycle.diagnosis.target !== goal.target))),
   );
 
   // P11 收件箱升级项深链：直接落到本店的裁决台，而不是只跳到工作台首页。
