@@ -76,6 +76,34 @@ function sumRange(from: number, to: number, fn: (d: number) => number): number {
 }
 
 /**
+ * P52.2 结算序列锚点：历史月份（已关闭的自然月）的日 GMV 一律按「日历日期相对这个固定时点」
+ * 取偏移，与「今天」无关。同一个历史月份无论哪天结算、哪天复盘，整月 GMV 都是同一个数；
+ * 近 30 天这类滚动窗口仍按今天滚动——它们本来就是滚动口径，冻结反而不对。
+ */
+const SETTLEMENT_SERIES_ANCHOR = new Date(2026, 10, 17); // 2026-11-17
+
+/** 日历日期相对锚点的天数偏移：锚点之前为正，与 dailyGmv 的 daysAgo 同向。 */
+function daysBeforeAnchor(date: Date): number {
+  const anchor = new Date(
+    SETTLEMENT_SERIES_ANCHOR.getFullYear(),
+    SETTLEMENT_SERIES_ANCHOR.getMonth(),
+    SETTLEMENT_SERIES_ANCHOR.getDate(),
+  );
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.round((anchor.getTime() - day.getTime()) / 86400000);
+}
+
+/** 某个自然月的整月 GMV（未乘店铺份额）：逐日取锚定序列，结果与调用日期无关。 */
+function monthGmv(year: number, monthIndex: number): number {
+  const days = new Date(year, monthIndex + 1, 0).getDate();
+  let total = 0;
+  for (let day = 1; day <= days; day += 1) {
+    total += dailyGmv(daysBeforeAnchor(new Date(year, monthIndex, day)));
+  }
+  return total;
+}
+
+/**
  * Store-scoped operating baseline for goal negotiation (P29.1).
  * Reuses the same deterministic daily GMV generator as the dashboard so the
  * goal card and the business KPIs cannot tell two different stories.
@@ -112,14 +140,9 @@ export function getStoreOperatingBaseline(storeName: string): StoreOperatingBase
   const dailyAvg = Math.round((sumRange(0, 13, dailyGmv) / 14) * share);
   const mtdGmv = Math.round(sumRange(0, monthDay - 1, dailyGmv) * share);
   // P33.2：结算用的是「上一个自然月」，不是「近 30 天」——口径不同，不能混用。
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const prevMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const prevMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-  const daysAgoOf = (date: Date) => Math.round((todayStart.getTime() - date.getTime()) / 86400000);
-  const previousMonthGmv = Math.round(
-    // sumRange 要求偏移量从小到大：上月末偏移更小，上月初始偏移更大。
-    sumRange(daysAgoOf(prevMonthEnd), daysAgoOf(prevMonthStart), dailyGmv) * share,
-  );
+  // P52.2：整月总量按日历锚定，不按「距今天数」回算，否则同一历史月份每过一天都会变。
+  const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const previousMonthGmv = Math.round(monthGmv(prevMonth.getFullYear(), prevMonth.getMonth()) * share);
   return {
     storeName,
     last30Gmv: Math.round(sumRange(0, 29, dailyGmv) * share),
