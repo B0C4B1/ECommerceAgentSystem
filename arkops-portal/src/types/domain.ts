@@ -761,8 +761,8 @@ export interface OperatingCycle {
   };
 }
 
-/** P6 经营周期触发来源 */
-export type CycleTrigger = 'manual' | 'schedule' | 'event';
+/** 方案触发来源：manual 人在环路、schedule 定时、event 事件、guard 护栏到期收回后由 Agent 重排。 */
+export type CycleTrigger = 'manual' | 'schedule' | 'event' | 'guard';
 
 // ===== Store Business Detail =====
 

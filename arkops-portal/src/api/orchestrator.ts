@@ -739,6 +739,8 @@ export interface GovernanceSweepResult {
   guardRestored: number;
   /** P47：到期时发现人已改过、仅清掉过期标记的条数。 */
   guardExpiryCleared: number;
+  /** P55.1：护栏到期收回后，Agent 自行按收回边界重排方案的店铺数。 */
+  cycleReplanned: number;
   /** P49：账户上期结算待办有新建或自动收口（0/1）。 */
   accountChanged: number;
   /** P51：超过审批时限后由 Agent 按策略收尾/升级的单数。 */
@@ -1677,6 +1679,25 @@ async function syncGuardEscalationsAcross(
     changed,
     changedStores: changedStores.size,
   };
+}
+
+/**
+ * P55.1：护栏是 Agent 自己按期收回的，方案就该由 Agent 自己按收回后的边界重排，
+ * 而不是留一张「目标或护栏已变更，请让 Agent 重跑」把人拖回来点一次。
+ * 只重排已存在的方案；方案里已有已提交/在途动作时不重排，保留 P54 的过期回执给人拦。
+ * 重排失败（例如没有开启任何 Agent）不写假回执，仍由 P54 的卡上回执兜底。
+ */
+async function replanCycleAfterGuardRestore(storeId: AllMallId): Promise<boolean> {
+  const cycle = cycles.get(storeId);
+  if (!cycle) return false;
+  if (cycle.proposals.some((proposal) => proposal.status === 'submitted')) return false;
+  const store = stores.find((item) => item.id === storeId);
+  try {
+    await orchestratorApi.generateCycle(storeId, { trigger: 'guard', storeName: store?.name });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export const orchestratorApi = {
@@ -3034,6 +3055,7 @@ export const orchestratorApi = {
     let guardChanged = 0;
     let guardRestored = 0;
     let guardExpiryCleared = 0;
+    let cycleReplanned = 0;
     for (const storeId of ids) {
       const period = await operatingModelApi.settleGoalPeriod(storeId);
       if (period.settled) settled += 1;
@@ -3043,6 +3065,10 @@ export const orchestratorApi = {
       const expiries = await operatingModelApi.restoreExpiredGuards(storeId);
       guardRestored += expiries.restored;
       guardExpiryCleared += expiries.cleared;
+      // P55.1：护栏是 Agent 自己收回的，方案也由 Agent 自己跟上，不把「补跑」留给人。
+      if (expiries.restored > 0 && (await replanCycleAfterGuardRestore(storeId))) {
+        cycleReplanned += 1;
+      }
     }
     // P38.1：护栏升级按账户口径一次同步，同一条护栏的多店提醒在这里合并。
     const guard = await syncGuardEscalationsAcross(ids);
@@ -3065,7 +3091,8 @@ export const orchestratorApi = {
         expiredApplied +
         approvalTimedOut +
         guardRestored +
-        guardExpiryCleared >
+        guardExpiryCleared +
+        cycleReplanned >
       0;
     return {
       storeCount: ids.length,
@@ -3076,6 +3103,7 @@ export const orchestratorApi = {
       expiredApplied,
       guardRestored,
       guardExpiryCleared,
+      cycleReplanned,
       accountChanged,
       approvalTimedOut,
       changed,

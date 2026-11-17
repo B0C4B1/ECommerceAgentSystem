@@ -201,6 +201,7 @@ export function DashboardPage() {
           queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] });
           if (sweep?.changed) {
             // P50：巡检改了目标/护栏后，账户级推导与单店卡必须同页重算，清单统一维护。
+            // P55.1 的护栏收回与方案重排也走这条清单（含 operatingCycle），不另写一份。
             invalidateOperatingModelQueries(queryClient);
           }
           if (!fired.length) return;

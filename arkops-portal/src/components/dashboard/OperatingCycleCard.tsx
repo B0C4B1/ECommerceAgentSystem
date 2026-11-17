@@ -765,7 +765,9 @@ export function OperatingCycleCard({
                   ? 'orange'
                   : cycle.triggeredBy === 'schedule'
                     ? 'blue'
-                    : 'default'
+                    : cycle.triggeredBy === 'guard'
+                      ? 'green'
+                      : 'default'
               }
             >
               {t(`cycle.trigger_${cycle.triggeredBy ?? 'manual'}`)}

@@ -223,11 +223,13 @@ export function AppShell() {
    */
   useEffect(() => {
     if (!hasBusinessData) return;
-    let cancelled = false;
     orchestratorApi
       .runGovernanceSweep()
       .then((sweep) => {
-        if (cancelled || !sweep.changed) return;
+        // P55.1：巡检已经改动服务端状态（收回护栏、重排方案），刷新缓存不该跟着组件挂载状态走。
+        // StrictMode 双挂载或快速切页时，若因卸载提前返回，真正做了收回与重排的那一轮就丢了刷新，
+        // 卡片会一直停在收回前的快照。这里只做缓存失效，不碰组件状态，卸载后执行也安全。
+        if (!sweep.changed) return;
         queryClient.invalidateQueries({ queryKey: ['dashboard'] });
         queryClient.invalidateQueries({ queryKey: ['exceptions'] });
         queryClient.invalidateQueries({ queryKey: ['storeGoal'] });
@@ -236,11 +238,10 @@ export function AppShell() {
         queryClient.invalidateQueries({ queryKey: ['guardHealth'] });
         queryClient.invalidateQueries({ queryKey: ['guardChanges'] });
         queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+        // P55.1：护栏到期收回后 Agent 会自行重排方案，进入应用时也要把方案卡刷新到新快照。
+        if (sweep.cycleReplanned) queryClient.invalidateQueries({ queryKey: ['operatingCycle'] });
       })
       .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
   }, [hasBusinessData, queryClient]);
 
   const pendingApprovals = hasBusinessData ? dashboard?.pendingApprovals ?? 0 : 0;

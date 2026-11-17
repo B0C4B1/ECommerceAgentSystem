@@ -3390,3 +3390,58 @@ P47 解决了「临时放宽必须显式到期」——人设一个期限，Agen
 - 账户目标超时「沿用」后仍缺一次显式留痕（收件箱处理记录之外的可回看摘要）。
 - 护栏到期自动恢复只在目标卡标签与审计里可见，可评估收件箱是否补一条「已替你收回」的收条。
 - 经营周期卡自身没有与目标卡等价的过期回执，可评估把同一条回执收口到两处共用。
+
+---
+
+## 2026-11-17 · P55.1 护栏是 Agent 自己收回的，方案也由 Agent 自己跟上
+
+### 为什么
+
+P47 让 Agent 在临时护栏到期时自动恢复原值，P54 又在「输入改了但方案没跟上」时给人一张过期回执加「让 Agent 重跑」。两件事叠在一起冒出新的断点：护栏是 Agent 自己按期收回的，方案却没有跟着重排。人打开工作台，看到的是「目标或护栏已变更，本轮方案仍按旧输入生成」+「让 Agent 重跑」——Agent 自己制造的一致性缺口，被转成一次人的补跑决策；文案还把责任指给「人改了护栏」，与审计里「Agent（治理巡检）恢复护栏」互相矛盾。
+
+走查证据（改前，headless Chrome + CDP，店铺 1001）：把折扣上限临时放宽到 32%、期限 1 天并保存，方案快照随之变为 32%；页面时钟前移 3 天重进工作台，目标已回到 30%、`guardExpiries = null`（收回成功），但 `guardSnapshot.maxDiscountPct` 仍是 32、`triggeredBy` 仍是 `manual`，目标卡出现过期回执。根因在 `src/api/orchestrator.ts` 的 `runGovernanceSweep`：它只累加 `restoreExpiredGuards` 的条数，没有触发 `generateCycle`。
+
+### 改了什么
+
+- `src/api/orchestrator.ts`：`runGovernanceSweep` 在 `restored > 0` 时调用新增的 `replanCycleAfterGuardRestore(storeId)`——只对已有方案的店铺，用收回后的护栏重跑 `generateCycle(..., { trigger: 'guard' })`；方案里有 `submitted` 在途动作时跳过，失败时静默返回 false（不写假回执）。返回值新增 `cycleReplanned` 并计入 `changed`。
+- `src/types/domain.ts`：`CycleTrigger` 增加 `guard`（护栏到期收回后由 Agent 重排）。
+- `src/components/dashboard/OperatingCycleCard.tsx`：`guard` 触发标签显示为绿色「护栏收回」。
+- `src/app/i18n.tsx`：新增 `cycle.trigger_guard`（zh-CN / en-US）。
+- `src/app/layout/AppShell.tsx`：进入应用的巡检完成后，若 `cycleReplanned` 则失效 `operatingCycle`；同时去掉巡检回调里「组件已卸载就提前 return」的判断——巡检已经改了服务端状态，刷新缓存不该跟着挂载状态走，否则 StrictMode 双挂载时真正做了收回与重排的那一轮会丢掉刷新（走查中正是这条导致卡片停在旧快照）。
+- `src/pages/dashboard/DashboardPage.tsx`：巡检结果注释说明 P55.1 也走 `invalidateOperatingModelQueries` 的统一清单（其中已含 `operatingCycle`），不另写一份。
+- 文档：`docs/product/roadmap.md` 登记并勾选 P55.1；本日志追加本节。
+
+### 规则口径
+
+- 护栏收回仍只在「当前值等于临时值」时发生（沿用 P47/P53 口径），本轮不改判定与恢复逻辑。
+- Agent 收回后默认自己重排：新增 `guard` 触发来源，不伪装成 `schedule` 或 `manual`，方案卡上人能直接看出这轮是「护栏收回」导致的。
+- 只在已有方案上跟进，不为从未生成过方案的店铺凭空造方案；不自动提交任何提案，重排后仍按原有执行/审批口径走。
+- 方案里已有 `submitted` 在途动作时不重排——人的在途决策优先，此时保留 P54 的过期回执，人可在卡上补跑或等待在途动作结束。
+- 重排失败（如未开启任何 Agent）不写任何「已完成」字样，P54 的过期回执原样保留，人能立即察觉并处理。
+
+### 边界
+
+- 不改护栏到期判定、恢复口径、P54 的人在环路重跑与回执；不改 `generateCycle` 的提案/仲裁/护栏逻辑。
+- 不新增页面、路由、数据源、后端或依赖；收件箱不新增「已重排」噪声条目，收回收条仍在审计与「自动处理」里。
+- 已知残留：mock 管线时延下，自动重排完成前（实测约 5 秒）目标卡还会短暂显示一次 P54 旧回执，随后自动消失；刷新页面则直接无回执。根治需要「巡检进行中」的全局状态，记为下一轮候选，不在本轮扩围。
+
+### 验证
+
+- `npm run build`（tsc --noEmit + Vite）通过。
+- 浏览器走查（headless Chrome + CDP，`http://127.0.0.1:5174/dashboard`，1440 宽，成熟商家账号，页面时钟前移 3 天模拟到期次日）：
+  - 收回前：目标 32%、`guardExpiries.maxDiscountPct.until = 2026-11-18 23:59`、方案 `guardSnapshot.maxDiscountPct = 32`、`triggeredBy = manual`。
+  - 到期重进：目标回到 30%、`guardExpiries = null`；方案 `guardSnapshot.maxDiscountPct = 30`、`triggeredBy = guard`；经营周期卡出现「护栏收回」标签；目标卡过期回执自动消失（前 5 秒仍在，之后清除，刷新即无）。
+  - 走查截图：`/tmp/arkops-p55-after-expiry.png`（收回 + 自动重排后的工作台）、`/tmp/arkops-p55-relaxed.png`（临时放宽保存后）。
+  - 静态核对：无方案时不重排；方案含 `submitted` 提案时跳过；`generateCycle` 抛错时 `replanCycleAfterGuardRestore` 返回 false，不产生「已重排」痕迹。
+
+### 三问自检
+
+- 人少做了一次什么决策：不用再判断「Agent 收回了护栏，方案要不要再跑一次」，也不用手动点「让 Agent 重跑」。
+- Agent 多承担了什么判断：Agent 知道收回护栏会让方案输入过期，并自己决定「什么情况下能安全重排（无在途提交）、什么情况下交给人的回执」。
+- 人能在哪里拦下：审计与「自动处理」保留「恢复护栏」的原值→新值记录；方案卡上的「护栏收回」标签标出这轮方案为何重来；有在途提交动作的店铺不会被动重排，P54 过期回执仍在卡上可补跑。
+
+### 下一轮建议
+
+- 自动重排完成前（mock 时延下约 5 秒）目标卡仍会短暂显示旧回执，可补一个「Agent 正在按收回边界重排」的进行中提示替代。
+- 护栏到期自动恢复在收件箱仍没有一条独立的「已替你收回」收条（目前只在「自动处理」与审计可见），可评估是否值得加。
+- 账户目标超时「沿用」后仍缺一次可回看的显式留痕。
