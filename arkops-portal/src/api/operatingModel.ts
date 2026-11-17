@@ -1802,6 +1802,37 @@ export const operatingModelApi = {
   },
 
   /**
+   * P56：账户目标停在「上期 · 待确认」时，人直接在工作台沿用上期数值，不必打开弹窗重填。
+   * 口径与 P49 收件箱「沿用上期目标」保持一致：只记本月已确认、上期缺口记为已接受，
+   * 不重写各店目标、不动护栏；已开着的账户结算待办由既有巡检口径一并收口。
+   */
+  upholdAccountGoal: async (meta: { actor: string; actorRole?: string }) => {
+    if (!accountGoal) return mockDelay({ confirmed: false, target: 0 });
+    if (dayjs(accountGoal.updatedAt).isSame(dayjs(), 'month')) {
+      return mockDelay({ confirmed: false, target: accountGoal.target });
+    }
+
+    const review = buildAccountGoalReview();
+    const actor = `${meta.actor?.trim() || '当前用户'}${meta.actorRole ? `（${meta.actorRole}）` : ''}`;
+    const before = accountGoal.target;
+    accountGoal = { ...accountGoal, periodLabel: '本月', updatedAt: new Date().toISOString() };
+    recordAuditLog({
+      actor,
+      action: '账户目标补救 · 沿用上期目标',
+      entity: 'account',
+      entityId: 'account',
+      summary: `账户目标沿用 ${formatCny(before)}，记为本月已确认${
+        review && review.shortfall > 0 ? `；上期缺口 ${formatCny(review.shortfall)} 记为已接受` : ''
+      }；各店目标与护栏未改动`,
+      category: 'human_ops',
+      linkTo: '/dashboard#portfolio-goals-card',
+    });
+    // 账户已回到本月口径后，sync 会把还开着的上期结算待办按既有口径收口。
+    await operatingModelApi.syncAccountGoalSettlementEscalation();
+    return mockDelay({ confirmed: true, target: before });
+  },
+
+  /**
    * 演示：把账户目标退回上一个自然月，复现「上期 · 待确认」。
    * 从未确认过账户目标时，用与 suggestAccountTarget 相同的基线口径补一条上期目标，
    * 保证刷新/重置后仍能走到这个状态；不写审计，因为它不是 Agent 或人的经营动作。

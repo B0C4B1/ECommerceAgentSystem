@@ -122,6 +122,30 @@ function AccountGoalSection({
     },
   });
 
+  /**
+   * P56：上期 · 待确认时，人不需要打开弹窗重填一个和上期相同的数字。
+   * Agent 按上期承诺直接落本月确认，各店目标与护栏保持不动；错点后仍可重新调整。
+   */
+  const uphold = useMutation({
+    mutationFn: () =>
+      operatingModelApi.upholdAccountGoal({
+        actor: user?.name ?? '当前用户',
+        actorRole: role ?? undefined,
+      }),
+    onError: (error) => message.error((error as Error).message),
+    onSuccess: (result) => {
+      if (!result.confirmed) {
+        message.info(t('accountGoal.carryOverNoop'));
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ['accountGoal'] });
+      queryClient.invalidateQueries({ queryKey: ['accountGoalReview'] });
+      queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      message.success(t('accountGoal.carriedOver', { value: formatMoney(result.target) }));
+    },
+  });
+
   if (storeIds.length <= 1) return null;
 
   const targetGap = accountGoal && isCurrent ? storeTargetSum - accountGoal.target : 0;
@@ -198,10 +222,21 @@ function AccountGoalSection({
               : ` · ${t('accountGoal.aligned')}`}
           </Typography.Text>
         )}
+        {/* P56：待确认时先给最省事的「沿用上期」，调整仍走「重新确认」。 */}
+        {canEdit && !isCurrent && accountGoal && (
+          <Button
+            size="small"
+            type="primary"
+            loading={uphold.isPending}
+            onClick={() => uphold.mutate()}
+          >
+            {t('accountGoal.carryOver', { value: formatMoney(accountGoal.target) })}
+          </Button>
+        )}
         {canEdit && (
           <Button
             size="small"
-            type={isCurrent ? 'default' : 'primary'}
+            type={!accountGoal ? 'primary' : 'default'}
             icon={<AimOutlined />}
             onClick={() => {
               setDraft(
