@@ -17,12 +17,13 @@ import { exceptionsApi, type ExceptionItem } from './exceptions';
 import { inventoryApi } from './inventory';
 import { stores } from './mockData';
 import { registerMockState } from './mockPersistence';
-import { AD_SPENT_RATIO, guardBlockKind, GUARD_TEMPLATE, operatingModelApi, resolveApprovalRequirement } from './operatingModel';
+import { AD_SPENT_RATIO, evaluateGuardViolations, guardBlockKind, GUARD_TEMPLATE, operatingModelApi, resolveApprovalRequirement } from './operatingModel';
 import { ensureHistory, getOutcomes, getWeekStart, outcomesApi } from './outcomes';
 import type {
   AgentCollaboration,
   AgentType,
   AllMallId,
+  ApprovalGuardViolation,
   ArbitrationDecision,
   ArbitrationReason,
   CollaborationKind,
@@ -1092,6 +1093,19 @@ export interface GuardImpactItem {
   projectedGrossMargin?: number;
 }
 
+/**
+ * P58：这次护栏调整会拦下哪些在途审批。
+ * 只含「按当前护栏合规、按调整后护栏越界」的单子——当前已经越界的由 P57 在审批页标红，
+ * 重复计入会让人以为调整新增了拦截。
+ */
+export interface GuardApprovalImpact {
+  approvalId: AllMallId;
+  title: string;
+  storeId: AllMallId;
+  storeName: string;
+  violations: ApprovalGuardViolation[];
+}
+
 /** P29.4 护栏影响预演结果：过去 7 天的拦截次数 + 按本轮方案推演的 GMV / 毛利变化。 */
 export interface GuardImpactPreview {
   storeId: AllMallId;
@@ -1102,6 +1116,8 @@ export interface GuardImpactPreview {
   blocked: GuardImpactItem[];
   gmvDelta: number;
   grossProfitDelta: number;
+  /** P58：调整后会被挡住的在途审批，让人在保存前就知道自己要拦下什么。 */
+  affectedApprovals: GuardApprovalImpact[];
 }
 
 /** P32.1 护栏体检结论：这条护栏现在对 Agent 是否真的构成约束。 */
@@ -1210,6 +1226,8 @@ export interface AccountGuardPreview {
   grossProfitDelta: number;
   /** 没有本轮方案的店铺不进预演，界面要显式说明覆盖了几家。 */
   withCycleCount: number;
+  /** P58：下发后会被挡下的在途审批（可下发的那些店铺）。 */
+  affectedApprovals: GuardApprovalImpact[];
 }
 
 const ACCOUNT_GUARD_KEYS: GuardHealthKey[] = ['minGrossMargin', 'maxDiscountPct', 'monthlyBudgetCap'];
@@ -1660,6 +1678,43 @@ async function replanCycleAfterGuardRestore(storeId: AllMallId): Promise<boolean
   }
 }
 
+/**
+ * P58：按「调整后」的护栏预演在途审批会不会被拦下。
+ * 与 approvals.ts 的决策前复核共用 evaluateGuardViolations，阈值口径只有一份；
+ * 只返回当前合规、调整后越界的单子，已经越界的那批 P57 已在审批页标红，不重复计入。
+ */
+async function approvalsBlockedByGuards(
+  storeId: AllMallId,
+  next: StoreGoal['constraints'],
+): Promise<GuardApprovalImpact[]> {
+  const policy = operatingModelApi.getEffectivePolicy(storeId);
+  const current: StoreGoal['constraints'] = {
+    minGrossMargin: policy.guards.minGrossMargin,
+    maxDiscountPct: policy.guards.maxDiscountPct,
+    monthlyBudgetCap: policy.guards.monthlyBudgetCap,
+  };
+  const pending = (await approvalsApi.list()).filter(
+    (item) => item.storeId === storeId && item.status === 'pending' && item.guardContext,
+  );
+  return pending.flatMap((item) => {
+    const subject = item.guardContext!;
+    if (evaluateGuardViolations(subject, current, policy.budgetPool, subject.priority).length > 0) {
+      return [];
+    }
+    const after = evaluateGuardViolations(subject, next, policy.budgetPool, subject.priority);
+    if (after.length === 0) return [];
+    return [
+      {
+        approvalId: item.id,
+        title: item.title,
+        storeId: item.storeId,
+        storeName: item.storeName,
+        violations: after,
+      },
+    ];
+  });
+}
+
 export const orchestratorApi = {
   /** 读取店铺当前经营周期；未生成时返回空环（阶段停在“感知”）。 */
   getCycle: (storeId: AllMallId): Promise<OperatingCycle> => {
@@ -1787,6 +1842,8 @@ export const orchestratorApi = {
       blocked,
       gmvDelta: Math.round(signedGmv),
       grossProfitDelta: Math.round(signedGrossProfit),
+      // P58：动作影响之外，再告诉人「保存后会挡下哪几条已经在等你的审批」。
+      affectedApprovals: await approvalsBlockedByGuards(storeId, next),
     });
   },
 
@@ -2071,6 +2128,8 @@ export const orchestratorApi = {
       gmvDelta: previews.reduce((sum, item) => sum + item.gmvDelta, 0),
       grossProfitDelta: previews.reduce((sum, item) => sum + item.grossProfitDelta, 0),
       withCycleCount: previews.filter((item) => item.hasCycle).length,
+      // P58：账户级下发不能绕过单店的「会拦下几条在途审批」，否则批量写入反而更隐蔽。
+      affectedApprovals: previews.flatMap((item) => item.affectedApprovals),
     });
   },
 

@@ -1052,6 +1052,20 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
                             ))}
                           </Space>
                         )}
+                        {guardImpact.affectedApprovals.length > 0 && (
+                          <div style={{ marginTop: 6 }}>
+                            <Typography.Text type="danger" style={{ display: 'block', fontSize: 12 }}>
+                              {t('goal.impact.approvals', { count: guardImpact.affectedApprovals.length })}
+                            </Typography.Text>
+                            <Space size={[6, 4]} wrap style={{ marginTop: 4 }}>
+                              {guardImpact.affectedApprovals.map((item) => (
+                                <Tag key={`approval-${item.approvalId}`} color="red" style={{ margin: 0 }}>
+                                  {item.title}
+                                </Tag>
+                              ))}
+                            </Space>
+                          </div>
+                        )}
                         <Typography.Text
                           type="secondary"
                           style={{ display: 'block', fontSize: 11, marginTop: 4 }}

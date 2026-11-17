@@ -912,6 +912,16 @@ function AccountGuardSection({ storeIds }: { storeIds: AllMallId[] }) {
               }
             />
           )}
+          {preview && preview.affectedApprovals.length > 0 && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginTop: 8 }}
+              message={t('accountGuard.previewApprovals', {
+                count: String(preview.affectedApprovals.length),
+              })}
+            />
+          )}
           {keptCount > 0 && (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {t('accountGuard.keepNote', { count: String(keptCount) })}
