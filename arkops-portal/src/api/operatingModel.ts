@@ -930,6 +930,56 @@ export const operatingModelApi = {
   },
 
   /**
+   * P53.1：人可提前收回临时放宽，不必等到期，也不必手动重填原值。
+   * 与到期收回同一安全口径：只有当前值仍等于当初的临时值时才恢复原值；
+   * 人此后改过该字段就只清掉标记，不拿旧值覆盖人的新决定。
+   */
+  endGuardExpiry: (
+    storeId: AllMallId,
+    field: keyof StoreGoal['constraints'],
+    meta: { actor: string; actorRole?: string },
+  ) => {
+    const index = goals.findIndex((g) => g.storeId === storeId);
+    const goal = index >= 0 ? goals[index] : undefined;
+    const expiry = goal?.guardExpiries?.[field];
+    if (!goal || !expiry) {
+      throw new Error('当前没有可收回的临时护栏');
+    }
+
+    const nextExpiries: GuardExpiries = { ...goal.guardExpiries };
+    delete nextExpiries[field];
+    const restore = goal.constraints[field] === expiry.value;
+    const next: StoreGoal = {
+      ...goal,
+      constraints: restore
+        ? { ...goal.constraints, [field]: expiry.baseValue }
+        : { ...goal.constraints },
+      guardExpiries: Object.keys(nextExpiries).length > 0 ? nextExpiries : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    goals[index] = next;
+
+    const fieldMeta = GUARD_FIELDS.find((item) => item.key === field);
+    const format = fieldMeta?.format ?? ((value: number) => `${value}`);
+    const actor = `${meta.actor?.trim() || '当前用户'}${meta.actorRole ? `（${meta.actorRole}）` : ''}`;
+    recordAuditLog({
+      actor,
+      action: '恢复护栏',
+      entity: 'store',
+      entityId: storeId,
+      storeId,
+      summary: restore
+        ? `${fieldMeta?.label ?? field} ${format(expiry.value)} → ${format(expiry.baseValue)}；原因：人提前收回临时放宽（原定 ${dayjs(expiry.until).format('MM-DD HH:mm')} 到期）`
+        : `${fieldMeta?.label ?? field} 临时放宽标记已收回；原因：该字段此后已由人改为 ${format(goal.constraints[field])}，不覆盖新值`,
+      category: 'human_ops',
+      linkTo: `/dashboard?storeId=${storeId}`,
+      guardChanges: restore ? [{ field, from: expiry.value, to: expiry.baseValue }] : undefined,
+    });
+    saveMockPersistence();
+    return mockDelay(next);
+  },
+
+  /**
    * P45.1：护栏改错的回滚。只允许撤销「当前仍在生效」的那条变更——
    * 同一字段此后又被改过时直接拒绝，避免撤销把人后来的调整一起覆盖。
    * 撤销本身仍走 saveGoal，因此照常带上原因、确认人，并写进同一条审计流水。

@@ -7,7 +7,7 @@
  */
 import { AimOutlined, CalendarOutlined, EditOutlined, HistoryOutlined, RiseOutlined, RobotOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Drawer, Input, InputNumber, Modal, Progress, Row, Select, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Drawer, Input, InputNumber, Modal, Popconfirm, Progress, Row, Select, Space, Tag, Typography, message } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -241,6 +241,36 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
         .then((cycle) => {
           queryClient.setQueryData(['operatingCycle', saved.storeId], cycle);
           queryClient.invalidateQueries({ queryKey: ['guardHealth', saved.storeId] });
+        })
+        .catch(() => undefined);
+    },
+  });
+
+  /**
+   * P53.1：人可随时收回临时放宽，不用等到期或手动重填原值。
+   * 收回同样是一次带原因的护栏变更，立刻让 Agent 按恢复后的边界重跑一轮。
+   */
+  const endExpiryMutation = useMutation({
+    mutationFn: (field: keyof StoreGoal['constraints']) =>
+      operatingModelApi.endGuardExpiry(storeId!, field, {
+        actor: user?.name ?? '当前用户',
+        actorRole: role ?? undefined,
+      }),
+    onError: (error) => {
+      message.error((error as Error).message);
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['storeGoal', saved.storeId], saved);
+      invalidateOperatingModelQueries(queryClient);
+      message.success(t('goal.guardEnded'));
+      orchestratorApi
+        .generateCycle(saved.storeId)
+        .then((cycle) => {
+          queryClient.setQueryData(['operatingCycle', saved.storeId], cycle);
+          queryClient.invalidateQueries({ queryKey: ['guardHealth', saved.storeId] });
+          queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+          queryClient.invalidateQueries({ queryKey: ['approvals'] });
+          queryClient.invalidateQueries({ queryKey: ['portfolio'] });
         })
         .catch(() => undefined);
     },
@@ -562,6 +592,27 @@ export function StoreGoalCard({ storeId, storeName, scopeAllStores }: StoreGoalC
                     {t('goal.guardTemporaryTag', {
                       time: dayjs(goal.guardExpiries[key]!.until).format('MM-DD HH:mm'),
                     })}
+                    {/* P53.1：放宽窗口人可随时提前收回，Agent 立即按原边界重跑。 */}
+                    {canEdit && (
+                      <Popconfirm
+                        title={t('goal.guardEndConfirmTitle')}
+                        description={t('goal.guardEndConfirmDesc', {
+                          value: formatGuardValue(key, goal.guardExpiries[key]!.baseValue),
+                        })}
+                        okText={t('goal.guardEndNow')}
+                        cancelText={t('common.cancel')}
+                        onConfirm={() => endExpiryMutation.mutate(key)}
+                      >
+                        <Button
+                          type="link"
+                          size="small"
+                          style={{ paddingInline: 4, height: 18, fontSize: 12 }}
+                          loading={endExpiryMutation.isPending && endExpiryMutation.variables === key}
+                        >
+                          {t('goal.guardEndNow')}
+                        </Button>
+                      </Popconfirm>
+                    )}
                   </Tag>
                 )}
               </Space>
