@@ -17,7 +17,7 @@ import { exceptionsApi, type ExceptionItem } from './exceptions';
 import { inventoryApi } from './inventory';
 import { stores } from './mockData';
 import { registerMockState } from './mockPersistence';
-import { GUARD_TEMPLATE, operatingModelApi, resolveApprovalRequirement } from './operatingModel';
+import { AD_SPENT_RATIO, guardBlockKind, GUARD_TEMPLATE, operatingModelApi, resolveApprovalRequirement } from './operatingModel';
 import { ensureHistory, getOutcomes, getWeekStart, outcomesApi } from './outcomes';
 import type {
   AgentCollaboration,
@@ -33,6 +33,7 @@ import type {
   CycleTrigger,
   GoalMetric,
   GoalOutcome,
+  GuardBlockKind,
   GuardExpiry,
   InventoryItem,
   OperatingCycle,
@@ -41,9 +42,6 @@ import type {
   StoreGoal,
   StoreGuards,
 } from '../types/domain';
-
-/** 假设本月已消耗 76% 的广告预算 — 让预算护栏在演示数据中可复现。 */
-const AD_SPENT_RATIO = 0.76;
 
 /** P30.1 超时默认的执行者标识：与“当前用户”区分，人在处理记录里能看出这条不是自己点的。 */
 const AGENT_TIMEOUT_ACTOR = 'Agent（超时默认）';
@@ -151,44 +149,6 @@ function buildProposals(cycleId: AllMallId): CycleProposal[] {
       discountPct: 30,
     },
   ];
-}
-
-/** P29.4 可被店铺目标直接调整的三类护栏；direction/dependency/double_count 不在此列。 */
-export type GuardBlockKind = 'margin' | 'discount_cap' | 'budget';
-
-/**
- * P29.4 护栏拦截判定的单一真源：仲裁与「护栏影响预演」共用同一套口径，
- * 否则预演说「能放开」、保存后实际仍被拦，人会白改一次护栏。
- */
-function guardBlockKind(
-  proposal: CycleProposal,
-  guards: StoreGoal['constraints'],
-  budgetPool: OperatingPolicy['budgetPool'],
-  priority: StoreGoal['priority'],
-): GuardBlockKind | null {
-  const discountLike =
-    proposal.action === 'increase_discount' || proposal.action === 'clear_stock';
-  if (
-    discountLike &&
-    priority !== 'clearance' &&
-    proposal.projectedGrossMargin !== undefined &&
-    proposal.projectedGrossMargin < guards.minGrossMargin
-  ) {
-    return 'margin';
-  }
-  if (
-    discountLike &&
-    proposal.discountPct !== undefined &&
-    proposal.discountPct > guards.maxDiscountPct
-  ) {
-    return 'discount_cap';
-  }
-  if (proposal.action === 'increase_ad_budget') {
-    const monthlyCap = Math.min(budgetPool.adMonthly, guards.monthlyBudgetCap);
-    const remainingBudget = Math.round(monthlyCap * (1 - AD_SPENT_RATIO));
-    if (proposal.cost > remainingBudget) return 'budget';
-  }
-  return null;
 }
 
 /**
@@ -3136,6 +3096,15 @@ export const orchestratorApi = {
       beforeValue: proposal.before,
       afterValue: proposal.after,
       riskLevel: proposal.riskLevel,
+      // P57：冻结提交时的经济口径。人之后收紧护栏时，审批页能按新边界复核这条在途动作，
+      // 而不是让它凭旧判断直接执行。
+      guardContext: {
+        action: proposal.action,
+        cost: proposal.cost,
+        projectedGrossMargin: proposal.projectedGrossMargin,
+        discountPct: proposal.discountPct,
+        priority: cycle.diagnosis.priority,
+      },
     });
     proposal.status = 'submitted';
     // P6 执行回执：自动执行也要区分成功 / 失败 / 超时，失败时升级给人并停止重试。

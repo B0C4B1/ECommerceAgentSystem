@@ -79,6 +79,29 @@ export interface Task {
   timeline: TimelineEvent[];
 }
 
+/** P29.4 可被店铺目标直接调整的三类护栏；direction/dependency/double_count 不在此列。 */
+export type GuardBlockKind = 'margin' | 'discount_cap' | 'budget';
+
+/**
+ * P57：审批提交时冻结的提案经济口径。护栏在提案生成后仍可能被人改动，
+ * 决策前必须拿「同一套口径 × 当前护栏」重算，否则旧判断会越过新边界被执行。
+ */
+export interface ApprovalGuardContext {
+  action: ProposalAction;
+  cost: number;
+  projectedGrossMargin?: number;
+  discountPct?: number;
+  /** 仲裁时的目标优先级：清仓目标下毛利护栏不适用，复核必须沿用同一口径。 */
+  priority: GoalPriority;
+}
+
+/** P57：按当前生效护栏复核出的越界项；actual / limit 让人一眼看出「越了多少」。 */
+export interface ApprovalGuardViolation {
+  kind: GuardBlockKind;
+  actual: number;
+  limit: number;
+}
+
 export interface Approval {
   id: AllMallId;
   taskId: AllMallId;
@@ -94,6 +117,10 @@ export interface Approval {
   status: ApprovalStatus;
   requestedAt: string;
   decidedAt?: string;
+  /** P57：只有经营周期提交的审批带这项；首启/历史审批没有它就不复核，避免误报。 */
+  guardContext?: ApprovalGuardContext;
+  /** P57：接口派生（不入库）——按店铺当前护栏重算的越界项，空表示仍合规。 */
+  guardViolations?: ApprovalGuardViolation[];
   // WS-B (B3/B4): appended optional fields — structured evidence & decision metadata
   evidence?: ApprovalEvidenceField[];
   decisionNote?: string;

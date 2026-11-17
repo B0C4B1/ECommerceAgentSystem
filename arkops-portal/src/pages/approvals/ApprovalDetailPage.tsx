@@ -71,13 +71,16 @@ export function ApprovalDetailPage() {
   });
   const outcome = outcomes?.find((item) => item.approvalId === approval?.id);
   const decide = useMutation({
-    mutationFn: ({ status, note }: { status: ApprovalDecision; note?: string }) =>
-      approvalsApi.decide(parsedApprovalId!, status, note),
+    mutationFn: ({ status, note, acknowledgeGuardViolation }: { status: ApprovalDecision; note?: string; acknowledgeGuardViolation?: boolean }) =>
+      approvalsApi.decide(parsedApprovalId!, status, note, { acknowledgeGuardViolation }),
     onSuccess: (result) => {
       setPendingDecision(null);
       if (!result) {
         // 已决策 / 双标签页重复提交时接口返回 undefined，不能再提示“已更新”。
         message.warning(t('approvalDetail.alreadyDecided'));
+      } else if (result.guardBlocked?.length) {
+        // P57：接口兜底拦下（例如页面数据还没刷新到最新护栏），不能报“已通过”。
+        message.warning(t('approvalDetail.guardReviewBlocked'));
       } else if (!result.finalized) {
         message.info(
           t('approvalDetail.dualFirstRecorded', {
@@ -169,6 +172,30 @@ export function ApprovalDetailPage() {
           ) : null
         }
       />
+
+      {/* P57：护栏在提案提交后被人收紧时，先在这里说清楚「这条动作已经不合规」，别等人点通过才知道 */}
+      {isPending && approval.guardViolations?.length ? (
+        <Alert
+          type="error"
+          showIcon
+          message={t('approvalDetail.guardReviewTitle')}
+          description={
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              {approval.guardViolations.map((violation) => (
+                <Typography.Text key={violation.kind} style={{ fontSize: 12 }}>
+                  {t(`approvalDetail.guardViolation_${violation.kind}`, {
+                    actual: String(violation.actual),
+                    limit: String(violation.limit),
+                  })}
+                </Typography.Text>
+              ))}
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('approvalDetail.guardReviewHint')}
+              </Typography.Text>
+            </Space>
+          }
+        />
+      ) : null}
 
       {/* B4: expiry countdown + timeout consequence */}
       {isPending && urgency && !approval.timeoutEscalatedAt && (
@@ -388,7 +415,9 @@ export function ApprovalDetailPage() {
         decision={pendingDecision}
         submitting={decide.isPending}
         onCancel={() => setPendingDecision(null)}
-        onConfirm={(note) => decide.mutate({ status: pendingDecision!, note: note || undefined })}
+        onConfirm={(note, acknowledgeGuardViolation) =>
+          decide.mutate({ status: pendingDecision!, note: note || undefined, acknowledgeGuardViolation })
+        }
       />
     </div>
   );

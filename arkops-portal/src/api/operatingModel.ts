@@ -17,18 +17,25 @@ import { getScenarioAutonomy, getScenarioForAgent } from './scenarioData';
 import type {
   AccountGoal,
   AllMallId,
+  ApprovalGuardViolation,
   ApprovalPolicy,
   ApprovalRequirement,
   AutonomyLevel,
+  CycleProposal,
   EffectivePolicy,
   GoalMetric,
   GoalPeriodSettlement,
+  GoalPriority,
+  GuardBlockKind,
   GuardExpiries,
   MerchantProfile,
   OperatingPolicy,
   RiskLevel,
   StoreGoal,
 } from '../types/domain';
+
+/** 假设本月已消耗 76% 的广告预算 — 让预算护栏在演示数据中可复现。 */
+export const AD_SPENT_RATIO = 0.76;
 
 /** 中小商家通用型模板 — 开箱即用的默认值。 */
 const GENERAL_PROFILE: MerchantProfile = { type: 'general', industry: '综合', scale: 'small' };
@@ -760,6 +767,64 @@ export function resolveApprovalPolicy(
   const action: ApprovalPolicy['action'] =
     requirement === 'auto' ? 'auto_execute' : requirement === 'dual' ? 'dual_approval' : 'single_approval';
   return { ...base, action };
+}
+
+/** 提案里参与护栏判定的经济字段；仲裁、预演、审批复核都只认这几项。 */
+type GuardSubject = Pick<CycleProposal, 'action' | 'cost' | 'projectedGrossMargin' | 'discountPct'>;
+
+/**
+ * P29.4 护栏拦截判定的单一真源：仲裁、预演与「审批提交后的复核」共用同一套口径。
+ * P57 起改由 operatingModel 持有，避免 orchestrator / approvals 各写一份而漂移。
+ */
+export function evaluateGuardViolations(
+  subject: GuardSubject,
+  guards: StoreGoal['constraints'],
+  budgetPool: OperatingPolicy['budgetPool'],
+  priority: GoalPriority,
+): ApprovalGuardViolation[] {
+  const violations: ApprovalGuardViolation[] = [];
+  const discountLike = subject.action === 'increase_discount' || subject.action === 'clear_stock';
+  if (
+    discountLike &&
+    priority !== 'clearance' &&
+    subject.projectedGrossMargin !== undefined &&
+    subject.projectedGrossMargin < guards.minGrossMargin
+  ) {
+    violations.push({
+      kind: 'margin',
+      actual: subject.projectedGrossMargin,
+      limit: guards.minGrossMargin,
+    });
+  }
+  if (
+    discountLike &&
+    subject.discountPct !== undefined &&
+    subject.discountPct > guards.maxDiscountPct
+  ) {
+    violations.push({
+      kind: 'discount_cap',
+      actual: subject.discountPct,
+      limit: guards.maxDiscountPct,
+    });
+  }
+  if (subject.action === 'increase_ad_budget') {
+    const monthlyCap = Math.min(budgetPool.adMonthly, guards.monthlyBudgetCap);
+    const remainingBudget = Math.round(monthlyCap * (1 - AD_SPENT_RATIO));
+    if (subject.cost > remainingBudget) {
+      violations.push({ kind: 'budget', actual: subject.cost, limit: remainingBudget });
+    }
+  }
+  return violations;
+}
+
+/** 只关心「被哪条护栏拦下」的调用方用这个；顺序固定，保证预演/仲裁/复核说法一致。 */
+export function guardBlockKind(
+  subject: GuardSubject,
+  guards: StoreGoal['constraints'],
+  budgetPool: OperatingPolicy['budgetPool'],
+  priority: GoalPriority,
+): GuardBlockKind | null {
+  return evaluateGuardViolations(subject, guards, budgetPool, priority)[0]?.kind ?? null;
 }
 
 export const operatingModelApi = {

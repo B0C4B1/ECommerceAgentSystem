@@ -16,7 +16,7 @@
  * - 2026-07-22: WS-B — created for B4 decision safeguards.
  */
 import { ArrowRightOutlined } from '@ant-design/icons';
-import { Alert, Input, Modal, Space, Tag, Typography } from 'antd';
+import { Alert, Checkbox, Input, Modal, Space, Tag, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { useI18n } from '../../app/i18n';
 import { resolveApprovalRequirement } from '../../api/operatingModel';
@@ -30,7 +30,8 @@ interface ApprovalDecisionModalProps {
   decision: ApprovalDecision | null;
   submitting?: boolean;
   onCancel: () => void;
-  onConfirm: (note: string) => void;
+  /** P57：approve 时带上「是否显式豁免护栏」，由审批接口再兜底复核一次。 */
+  onConfirm: (note: string, acknowledgeGuardViolation: boolean) => void;
 }
 
 /**
@@ -40,10 +41,15 @@ interface ApprovalDecisionModalProps {
 export function ApprovalDecisionModal({ approval, decision, submitting, onCancel, onConfirm }: ApprovalDecisionModalProps) {
   const { t } = useI18n();
   const [note, setNote] = useState('');
+  // P57：越界时默认不勾选，通过按钮不可用——人必须真的看过护栏结论才能放行。
+  const [guardAcknowledged, setGuardAcknowledged] = useState(false);
   const open = !!approval && !!decision;
 
   useEffect(() => {
-    if (open) setNote('');
+    if (open) {
+      setNote('');
+      setGuardAcknowledged(false);
+    }
   }, [open, approval?.id, decision]);
 
   if (!approval || !decision) {
@@ -56,6 +62,8 @@ export function ApprovalDecisionModal({ approval, decision, submitting, onCancel
   const isDual = requirement === 'dual';
   const completedApprovals = approval.priorApprovals?.length ?? 0;
   const isFirstOfDual = isApprove && isDual && completedApprovals + 1 < 2;
+  const guardViolations = isApprove ? approval.guardViolations ?? [] : [];
+  const guardBlocked = guardViolations.length > 0;
 
   const consequence = isApprove
     ? isDual
@@ -75,13 +83,40 @@ export function ApprovalDecisionModal({ approval, decision, submitting, onCancel
             : t('approvalDetail.confirmReject')
       }
       cancelText={t('common.cancel')}
-      okButtonProps={{ danger: !isApprove, loading: submitting }}
-      onOk={() => onConfirm(note.trim())}
+      okButtonProps={{
+        danger: !isApprove,
+        loading: submitting,
+        disabled: guardBlocked && !guardAcknowledged,
+      }}
+      onOk={() => onConfirm(note.trim(), guardAcknowledged)}
       onCancel={onCancel}
       destroyOnClose
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Alert type={isApprove ? 'info' : 'warning'} showIcon message={consequence} />
+        {guardBlocked ? (
+          <Alert
+            type="error"
+            showIcon
+            message={t('approvalDetail.guardReviewTitle')}
+            description={
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                {guardViolations.map((violation) => (
+                  <Typography.Text key={violation.kind} style={{ fontSize: 12 }}>
+                    {t(`approvalDetail.guardViolation_${violation.kind}`, {
+                      actual: String(violation.actual),
+                      limit: String(violation.limit),
+                    })}
+                  </Typography.Text>
+                ))}
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('approvalDetail.guardReviewHint')}
+                </Typography.Text>
+              </Space>
+            }
+          />
+        ) : (
+          <Alert type={isApprove ? 'info' : 'warning'} showIcon message={consequence} />
+        )}
         <div>
           <Typography.Text strong>{approval.title}</Typography.Text>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 4, fontSize: 12 }}>
@@ -113,6 +148,11 @@ export function ApprovalDecisionModal({ approval, decision, submitting, onCancel
             </Typography.Text>
           )}
         </div>
+        {guardBlocked && (
+          <Checkbox checked={guardAcknowledged} onChange={(event) => setGuardAcknowledged(event.target.checked)}>
+            {t('approvalDetail.guardReviewAck')}
+          </Checkbox>
+        )}
         <div>
           <Typography.Text strong style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>
             {t('approvalDetail.noteLabel')}

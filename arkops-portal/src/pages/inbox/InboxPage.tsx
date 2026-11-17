@@ -678,11 +678,23 @@ export function InboxPage() {
   }, [queryClient]);
 
   const decide = useMutation({
-    mutationFn: ({ approvalId, status, note }: { approvalId: number; status: ApprovalDecision; note?: string }) =>
-      approvalsApi.decide(approvalId, status, note),
+    mutationFn: ({
+      approvalId,
+      status,
+      note,
+      acknowledgeGuardViolation,
+    }: {
+      approvalId: number;
+      status: ApprovalDecision;
+      note?: string;
+      acknowledgeGuardViolation?: boolean;
+    }) => approvalsApi.decide(approvalId, status, note, { acknowledgeGuardViolation }),
     onSuccess: (result) => {
       setDecisionTarget(null);
-      if (result && !result.finalized) {
+      if (result?.guardBlocked?.length) {
+        // P57：护栏收紧后接口会拦下通过，收件箱不能提示「已更新」；豁免在审批详情里做。
+        message.warning(t('approvalDetail.guardReviewBlocked'));
+      } else if (result && !result.finalized) {
         message.info(
           t('approvalDetail.dualFirstRecorded', {
             completed: result.approvalsCompleted,
@@ -2232,12 +2244,13 @@ export function InboxPage() {
         decision={decisionTarget?.decision ?? null}
         submitting={decide.isPending}
         onCancel={() => setDecisionTarget(null)}
-        onConfirm={(note) =>
+        onConfirm={(note, acknowledgeGuardViolation) =>
           decisionTarget &&
           decide.mutate({
             approvalId: decisionTarget.approval.id,
             status: decisionTarget.decision,
-            note: note || undefined
+            note: note || undefined,
+            acknowledgeGuardViolation,
           })
         }
       />

@@ -3,13 +3,15 @@ import { approvalEvidence, approvalPriorApprovals, approvals, auditLogs, tasks }
 import { insertFirst, replaceItem } from './mockRepository';
 import { recordAuditLog } from './auditLogger';
 import { registerMockState } from './mockPersistence';
-import { resolveApprovalRequirement } from './operatingModel';
+import { resolveApprovalRequirement, evaluateGuardViolations, operatingModelApi } from './operatingModel';
 import { getPolicyForRisk } from './approvalPolicies';
 import { outcomesApi } from './outcomes';
 import type {
   AgentType,
   AllMallId,
   Approval,
+  ApprovalGuardContext,
+  ApprovalGuardViolation,
   ApprovalRequirement,
   ApprovalStatus,
   AuditLog,
@@ -29,8 +31,43 @@ function withEvidence(approval: Approval): Approval {
   return {
     ...approval,
     evidence: approval.evidence ?? approvalEvidence[approval.id],
-    priorApprovals: approval.priorApprovals ?? approvalPriorApprovals[approval.id]
+    priorApprovals: approval.priorApprovals ?? approvalPriorApprovals[approval.id],
+    // P57：每次读取都按店铺「当前」护栏重算，人不打开页面也骗不过去；
+    // 没有 guardContext 的历史审批直接跳过，不误报。
+    guardViolations: reviewGuardViolations(approval),
   };
+}
+
+/**
+ * P57：用提交时冻结的经济口径 × 当前生效护栏复核在途审批。
+ * 判定口径与仲裁共用 evaluateGuardViolations，避免两套阈值说法。
+ */
+function reviewGuardViolations(approval: Approval): ApprovalGuardViolation[] {
+  if (!approval.guardContext) return [];
+  const policy = operatingModelApi.getEffectivePolicy(approval.storeId);
+  return evaluateGuardViolations(
+    approval.guardContext,
+    {
+      minGrossMargin: policy.guards.minGrossMargin,
+      maxDiscountPct: policy.guards.maxDiscountPct,
+      monthlyBudgetCap: policy.guards.monthlyBudgetCap,
+    },
+    policy.budgetPool,
+    approval.guardContext.priority,
+  );
+}
+
+/** P57：审计里要把「越了哪条、越多少」写清楚，人才知道豁免的是什么。 */
+function describeGuardViolations(violations: ApprovalGuardViolation[]): string {
+  return violations
+    .map((item) =>
+      item.kind === 'margin'
+        ? `毛利率 ${item.actual}% 低于下限 ${item.limit}%`
+        : item.kind === 'discount_cap'
+          ? `折扣 ${item.actual}% 超过上限 ${item.limit}%`
+          : `预算 ¥${item.actual} 超过本月剩余 ¥${item.limit}`,
+    )
+    .join('；');
 }
 
 /** P1: 创建审批的结果 — 店铺策略判定为自动执行时不会产生审批单。 */
@@ -51,6 +88,8 @@ export interface ApprovalDecisionResult {
   approvalsRequired: number;
   /** S1 回执：审批真正影响到的目标效果记录（没有挂账时为空） */
   outcome?: GoalOutcome;
+  /** P57：按当前护栏复核出的越界项。非空表示这次通过被拦下，审批单仍是 pending。 */
+  guardBlocked?: ApprovalGuardViolation[];
 }
 
 function recordDecisionAudit(
@@ -182,6 +221,8 @@ export const approvalsApi = {
       metric: GoalMetric;
       expectedImpact: number;
     };
+    /** P57：经营周期提案带上经济口径，供决策前按当前护栏复核；其他入口可以不带。 */
+    guardContext?: ApprovalGuardContext;
   }) => {
     // P1: 审批是否发生由「风险等级 × 店铺生效自主等级」决定，而不是全局风险策略。
     const requirement = resolveApprovalRequirement(input.storeId, input.agentType, input.riskLevel);
@@ -243,7 +284,9 @@ export const approvalsApi = {
   decide: (
     approvalId: AllMallId,
     status: Extract<ApprovalStatus, 'approved' | 'rejected'>,
-    note?: string
+    note?: string,
+    /** P57：人看过复核结论后显式豁免；不传就是不豁免，越界动作一律拦下。 */
+    options?: { acknowledgeGuardViolation?: boolean },
   ): Promise<ApprovalDecisionResult | undefined> => {
     const current = approvals.find((item) => item.id === approvalId);
     if (!current) return mockDelay(undefined);
@@ -263,6 +306,26 @@ export const approvalsApi = {
       current.requirement ?? resolveApprovalRequirement(current.storeId, current.agentType, current.riskLevel);
     const approvalsRequired = requirement === 'dual' ? 2 : 1;
     const priorApprovals = enriched.priorApprovals ?? [];
+
+    // P57：护栏在提案提交后被人收紧，审批单本身不知道。通过前按当前护栏复核一次：
+    // 默认拦下（包括双人审批的一审），只有人显式豁免才继续，并留一条可回看的审计。
+    const guardViolations = status === 'approved' ? enriched.guardViolations ?? [] : [];
+    if (guardViolations.length > 0 && !options?.acknowledgeGuardViolation) {
+      return mockDelay({
+        approval: enriched,
+        finalized: false,
+        approvalsCompleted: priorApprovals.length,
+        approvalsRequired,
+        guardBlocked: guardViolations,
+      });
+    }
+    if (guardViolations.length > 0) {
+      recordDecisionAudit(
+        current,
+        '护栏豁免',
+        `${current.title} - 当前护栏已收紧（${describeGuardViolations(guardViolations)}），${CURRENT_ACTOR} 显式豁免后通过`,
+      );
+    }
 
     // First approve of a dual-approval item: record progress, stay pending.
     if (status === 'approved' && approvalsRequired === 2 && priorApprovals.length + 1 < approvalsRequired) {
